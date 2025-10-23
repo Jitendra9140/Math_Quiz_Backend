@@ -150,7 +150,7 @@ exports.acceptFrndRequest = async (req, res) => {
 
     console.log("receiver sender", receiver, sender);
 
-    if (receiver?.fcmToken) {
+    if (sender?.fcmToken) {
       const payload = {
         token: sender.fcmToken,
         notification: {
@@ -223,7 +223,7 @@ exports.rejectFrndRequest = async (req, res) => {
 
     console.log("receiver sender", receiver, sender);
 
-    if (receiver?.fcmToken) {
+    if (sender?.fcmToken) {
       const payload = {
         token: sender.fcmToken,
         notification: {
