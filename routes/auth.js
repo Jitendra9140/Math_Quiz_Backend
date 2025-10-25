@@ -9,6 +9,7 @@ router.post('/signup', authController.signup)
 router.post('/sendForgotPassOtp', authController.sendForgotPasswordOtp);
 router.post('/changePass', authController.changePass);
 
+router.get('/getUser', auth ,authController.getUser);
 router.get('/allUser', authController.allUserList);
 
 router.patch('/save-fcmToken', auth, authController.saveFcmToken );

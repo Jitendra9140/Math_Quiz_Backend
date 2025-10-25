@@ -338,3 +338,22 @@ exports.saveFcmToken = async(req, res) =>{
     });
   }
 }
+
+exports.getUser = async (req, res) => {
+  const { _id } = req.user; 
+  try {
+    const user = await Player.findById(_id); 
+      
+    return res.status(200).json({
+      success: true,
+      user,
+    });
+    
+  } catch (error) {
+    console.error("Error fetching users:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Server error",
+    });
+  }
+};
