@@ -1,227 +1,244 @@
+// class MatchmakingService {
+//   constructor(playerManager, gameRoomManager) {
+//     this.playerManager = playerManager;
+//     this.gameRoomManager = gameRoomManager;
+//     this.matchmakingQueue = new Map(); // playerId -> { player, searchStartTime, maxRatingDiff }
+//     this.matchmakingInterval = setInterval(() => this.processMatchmaking(), 2000);
+//   }
+
+//   findMatch(player, onMatchFound) {
+//     console.log('finding match')
+    
+//     // Add player to matchmaking queue
+//     this.matchmakingQueue.set(player.id, {
+//       player,
+//       searchStartTime: Date.now(),
+//       maxRatingDiff: 100, // Start with strict matching
+//       onMatchFound
+//     });
+
+//     player.isInGame = false;
+    
+//     // Try immediate matching
+//     this.tryMatchPlayer(player.id);
+//   }
+
+//   processMatchmaking() {
+//     for (const [playerId, queueData] of this.matchmakingQueue) {
+//       // Expand search range over time (up to 5 minutes)
+//       const searchTime = Date.now() - queueData.searchStartTime;
+//       const timeBasedExpansion = Math.min(searchTime / 1000 / 10, 30); // 3 points per second, max 300
+//       queueData.maxRatingDiff = Math.min(100 + timeBasedExpansion * 10, 500);
+
+//       this.tryMatchPlayer(playerId);
+//     }
+//   }
+
+//   tryMatchPlayer(playerId) {
+//     const queueData = this.matchmakingQueue.get(playerId);
+//     if (!queueData) return;
+
+//     const { player, maxRatingDiff, onMatchFound } = queueData;
+
+//     // Find potential opponents
+//     const potentialOpponents = this.playerManager
+//       .findPlayersInRatingRange(player.rating, maxRatingDiff)
+//       .filter(p => 
+//         p.id !== player.id && 
+//         !p.isInGame && 
+//         p.timer == player.timer && 
+//         p.diff == player.diff && 
+//         this.matchmakingQueue.has(p.id)
+//       );
+
+//     if (potentialOpponents.length > 0) {
+//       // Select best opponent (closest rating)
+//       const opponent = potentialOpponents.reduce((best, current) => {
+//         const bestDiff = Math.abs(best.rating - player.rating);
+//         const currentDiff = Math.abs(current.rating - player.rating);
+//         return currentDiff < bestDiff ? current : best;
+//       });
+
+//       // Create game room
+//       const gameRoom = this.gameRoomManager.createGameRoom([player, opponent]);
+      
+//       // Mark players as in game
+//       player.isInGame = true;
+//       opponent.isInGame = true;
+
+//       // Remove from matchmaking queue
+//       this.matchmakingQueue.delete(player.id);
+//       this.matchmakingQueue.delete(opponent.id);
+
+//       // Notify about match
+//       onMatchFound(gameRoom);
+//       const opponentQueueData = this.matchmakingQueue.get(opponent.id);
+//       if (opponentQueueData) {
+//         opponentQueueData.onMatchFound(gameRoom);
+//       }
+//     }
+//   }
+
+//   removeFromQueue(player) {
+//     console.log('player removed from queue', player)
+//     this.matchmakingQueue.delete(player.id);
+//     player.isInGame = false;
+//   }
+
+//   getQueueSize() {
+//     return this.matchmakingQueue.size;
+//   }
+
+//   getAverageWaitTime() {
+//     if (this.matchmakingQueue.size === 0) return 0;
+    
+//     const now = Date.now();
+//     const totalWaitTime = Array.from(this.matchmakingQueue.values())
+//       .reduce((sum, queueData) => sum + (now - queueData.searchStartTime), 0);
+    
+//     return Math.round(totalWaitTime / this.matchmakingQueue.size / 1000);
+//   }
+
+//   destroy() {
+//     if (this.matchmakingInterval) {
+//       clearInterval(this.matchmakingInterval);
+//     }
+//   }
+// }
+
+// module.exports = {MatchmakingService}
+
+
+//  auto matching player logic ^
+
+// manually send changle request logic v
+
 class MatchmakingService {
   constructor(playerManager, gameRoomManager) {
     this.playerManager = playerManager;
     this.gameRoomManager = gameRoomManager;
-    this.matchmakingQueue = new Map(); // playerId -> { player, searchStartTime, maxRatingDiff }
-    this.matchmakingInterval = setInterval(() => this.processMatchmaking(), 2000);
+
+    // Track pending challenges: key = opponentId, value = challengerId
+    this.pendingChallenges = new Map();
+    // Cooldown tracking: key = playerId, value = timestamp
+    this.cooldowns = new Map();
   }
 
-  findMatch(player, onMatchFound) {
-    console.log('finding match')
-    
-    // Add player to matchmaking queue
-    this.matchmakingQueue.set(player.id, {
-      player,
-      searchStartTime: Date.now(),
-      maxRatingDiff: 100, // Start with strict matching
-      onMatchFound
-    });
+  /** Get a list of potential opponents for a player */
+  findPotentialOpponents(player) {
+    console.log(`Finding potential opponents for player ${player.id}`);
 
-    player.isInGame = false;
-    
-    // Try immediate matching
-    this.tryMatchPlayer(player.id);
-  }
-
-  processMatchmaking() {
-    for (const [playerId, queueData] of this.matchmakingQueue) {
-      // Expand search range over time (up to 5 minutes)
-      const searchTime = Date.now() - queueData.searchStartTime;
-      const timeBasedExpansion = Math.min(searchTime / 1000 / 10, 30); // 3 points per second, max 300
-      queueData.maxRatingDiff = Math.min(100 + timeBasedExpansion * 10, 500);
-
-      this.tryMatchPlayer(playerId);
-    }
-  }
-
-  tryMatchPlayer(playerId) {
-    const queueData = this.matchmakingQueue.get(playerId);
-    if (!queueData) return;
-
-    const { player, maxRatingDiff, onMatchFound } = queueData;
-
-    // Find potential opponents
-    const potentialOpponents = this.playerManager
-      .findPlayersInRatingRange(player.rating, maxRatingDiff)
-      .filter(p => 
-        p.id !== player.id && 
-        !p.isInGame && 
-        p.timer == player.timer && 
-        p.diff == player.diff && 
-        this.matchmakingQueue.has(p.id)
+    const allOpponents = this.playerManager
+      .findPlayersInRatingRange(player.rating, 200)
+      .filter(
+        (p) =>
+          p.id !== player.id &&
+          !p.isInGame &&
+          p.timer === player.timer &&
+          p.diff === player.diff
       );
 
-    if (potentialOpponents.length > 0) {
-      // Select best opponent (closest rating)
-      const opponent = potentialOpponents.reduce((best, current) => {
-        const bestDiff = Math.abs(best.rating - player.rating);
-        const currentDiff = Math.abs(current.rating - player.rating);
-        return currentDiff < bestDiff ? current : best;
-      });
+    // Sort by closest rating
+    allOpponents.sort(
+      (a, b) => Math.abs(a.rating - player.rating) - Math.abs(b.rating - player.rating)
+    );
 
-      // Create game room
-      const gameRoom = this.gameRoomManager.createGameRoom([player, opponent]);
-      
-      // Mark players as in game
-      player.isInGame = true;
-      opponent.isInGame = true;
-
-      // Remove from matchmaking queue
-      this.matchmakingQueue.delete(player.id);
-      this.matchmakingQueue.delete(opponent.id);
-
-      // Notify about match
-      onMatchFound(gameRoom);
-      const opponentQueueData = this.matchmakingQueue.get(opponent.id);
-      if (opponentQueueData) {
-        opponentQueueData.onMatchFound(gameRoom);
-      }
-    }
+    // Return top 10
+    return allOpponents.slice(0, 10);
   }
 
-  removeFromQueue(player) {
-    console.log('player removed from queue', player)
-    this.matchmakingQueue.delete(player.id);
-    player.isInGame = false;
-  }
+  /** Send a challenge request */
+  sendChallenge(challengerId, opponentId, io) {
+    const challenger = this.playerManager.getPlayerById(challengerId);
+    const opponent = this.playerManager.getPlayerById(opponentId);
 
-  getQueueSize() {
-    return this.matchmakingQueue.size;
-  }
+    if (!challenger || !opponent)
+      return { success: false, message: "Player not found" };
 
-  getAverageWaitTime() {
-    if (this.matchmakingQueue.size === 0) return 0;
-    
+    if (challenger.isInGame || opponent.isInGame)
+      return { success: false, message: "One of the players is already in a game" };
+
+    // Check cooldown
     const now = Date.now();
-    const totalWaitTime = Array.from(this.matchmakingQueue.values())
-      .reduce((sum, queueData) => sum + (now - queueData.searchStartTime), 0);
-    
-    return Math.round(totalWaitTime / this.matchmakingQueue.size / 1000);
+    const lastChallengeTime = this.cooldowns.get(challengerId);
+    if (lastChallengeTime && now - lastChallengeTime < 10000) {
+      const wait = ((10000 - (now - lastChallengeTime)) / 1000).toFixed(1);
+      return { success: false, message: `Please wait ${wait}s before sending another challenge.` };
+    }
+
+    // Prevent duplicate challenge
+    if (this.pendingChallenges.has(opponentId)) {
+      return { success: false, message: "Opponent already has a pending challenge." };
+    }
+
+    // Store pending challenge
+    this.pendingChallenges.set(opponentId, {
+      challengerId,
+      createdAt: Date.now(),
+    });
+
+    // Add cooldown
+    this.cooldowns.set(challengerId, Date.now());
+
+    // Notify opponent
+    io.to(opponent.socketId).emit("challenge-received", {
+      fromPlayer: {
+        id: challenger.id,
+        name: challenger.name,
+        rating: challenger.rating,
+      },
+    });
+
+    // Auto-expire after 30 seconds
+    setTimeout(() => {
+      const challenge = this.pendingChallenges.get(opponentId);
+      if (challenge && challenge.challengerId === challengerId) {
+        this.pendingChallenges.delete(opponentId);
+        io.to(challenger.socketId).emit("challenge-expired", { opponentId });
+        io.to(opponent.socketId).emit("challenge-expired", { challengerId });
+      }
+    }, 30000);
+
+    return { success: true, message: "Challenge sent successfully" };
   }
 
-  destroy() {
-    if (this.matchmakingInterval) {
-      clearInterval(this.matchmakingInterval);
+  /** Handle opponent response */
+  respondToChallenge(opponentId, accepted, io) {
+    const challenge = this.pendingChallenges.get(opponentId);
+    if (!challenge) {
+      return { success: false, message: "No active challenge found" };
     }
+
+    const { challengerId } = challenge;
+    const challenger = this.playerManager.getPlayerById(challengerId);
+    const opponent = this.playerManager.getPlayerById(opponentId);
+
+    if (!challenger || !opponent)
+      return { success: false, message: "Player not found" };
+
+    this.pendingChallenges.delete(opponentId);
+
+    if (!accepted) {
+      io.to(challenger.socketId).emit("challenge-declined", {
+        by: opponent.id,
+        name: opponent.name,
+      });
+      return { success: true, message: "Challenge declined" };
+    }
+
+    // Create game room
+    const gameRoom = this.gameRoomManager.createGameRoom([challenger, opponent]);
+    challenger.isInGame = true;
+    opponent.isInGame = true;
+
+    io.to(challenger.socketId).emit("match-found", { gameRoom, opponent });
+    io.to(opponent.socketId).emit("match-found", { gameRoom, opponent: challenger });
+
+    return { success: true, message: "Match started" };
   }
 }
 
-module.exports = {MatchmakingService}
+module.exports = { MatchmakingService };
 
 
 
-
-// class MatchmakingService {
-//     constructor(playerManager, gameRoomManager) {
-//         this.playerManager = playerManager;
-//         this.gameRoomManager = gameRoomManager;
-//         this.matchmakingQueue = [];
-//         this.matchmakingTimeout = 30000; // 30 seconds max wait time
-//     }
-
-//     findMatch(player, callback) {
-//         console.log(`Finding match for player: ${player.username} (Rating: ${player.rating})`);
-        
-//         // Add player to queue
-//         this.matchmakingQueue.push({
-//             player,
-//             callback,
-//             joinedQueueAt: new Date()
-//         });
-
-//         this.playerManager.updatePlayerStatus(player.socketId, 'lobby');
-
-//         // Try to find a match immediately
-//         this.processMatchmaking();
-
-//         // Set timeout for this player
-//         setTimeout(() => {
-//             this.handleMatchmakingTimeout(player);
-//         }, this.matchmakingTimeout);
-//     }
-
-//     processMatchmaking() {
-//         while (this.matchmakingQueue.length >= 2) {
-//             // Sort queue by rating for better matching
-//             this.matchmakingQueue.sort((a, b) => a.player.rating - b.player.rating);
-
-//             const player1Entry = this.matchmakingQueue.shift();
-//             let bestMatch = null;
-//             let bestMatchIndex = -1;
-
-//             // Find the best match within rating range
-//             for (let i = 0; i < this.matchmakingQueue.length; i++) {
-//                 const player2Entry = this.matchmakingQueue[i];
-//                 const ratingDifference = Math.abs(player1Entry.player.rating - player2Entry.player.rating);
-                
-//                 // Acceptable rating difference increases with wait time
-//                 const waitTime = Date.now() - player1Entry.joinedQueueAt.getTime();
-//                 const maxRatingDiff = Math.min(200 + (waitTime / 1000) * 10, 500);
-
-//                 if (ratingDifference <= maxRatingDiff) {
-//                     bestMatch = player2Entry;
-//                     bestMatchIndex = i;
-//                     break;
-//                 }
-//             }
-
-//             if (bestMatch) {
-//                 // Remove the matched player from queue
-//                 this.matchmakingQueue.splice(bestMatchIndex, 1);
-
-//                 // Create game room
-//                 const gameRoom = this.gameRoomManager.createGameRoom([player1Entry.player, bestMatch.player]);
-                
-//                 // Update player statuses
-//                 this.playerManager.updatePlayerStatus(player1Entry.player.socketId, 'matched');
-//                 this.playerManager.updatePlayerStatus(bestMatch.player.socketId, 'matched');
-
-//                 console.log(`Match found: ${player1Entry.player.username} vs ${bestMatch.player.username}`);
-
-//                 // Notify both players
-//                 player1Entry.callback(gameRoom);
-//                 bestMatch.callback(gameRoom);
-//             } else {
-//                 // No suitable match found, put player back in queue
-//                 this.matchmakingQueue.unshift(player1Entry);
-//                 break;
-//             }
-//         }
-//     }
-
-//     handleMatchmakingTimeout(player) {
-//         // Remove player from queue if still waiting
-//         this.matchmakingQueue = this.matchmakingQueue.filter(entry => 
-//             entry.player.socketId !== player.socketId
-//         );
-        
-//         console.log(`Matchmaking timeout for player: ${player.username}`);
-//     }
-
-//     removeFromQueue(player) {
-//         this.matchmakingQueue = this.matchmakingQueue.filter(entry => 
-//             entry.player.socketId !== player.socketId
-//         );
-//         console.log(`Player removed from matchmaking queue: ${player.username}`);
-//     }
-
-//     getQueueStatus() {
-//         return {
-//             playersInQueue: this.matchmakingQueue.length,
-//             averageWaitTime: this.calculateAverageWaitTime()
-//         };
-//     }
-
-//     calculateAverageWaitTime() {
-//         if (this.matchmakingQueue.length === 0) return 0;
-        
-//         const now = new Date();
-//         const totalWaitTime = this.matchmakingQueue.reduce((sum, entry) => {
-//             return sum + (now - entry.joinedQueueAt);
-//         }, 0);
-        
-//         return totalWaitTime / this.matchmakingQueue.length / 1000; // seconds
-//     }
-// }
-
-// module.exports = { MatchmakingService };

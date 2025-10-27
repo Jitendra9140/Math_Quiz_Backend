@@ -21,7 +21,7 @@ class PlayerManager {
       isInGame: false,
       diff: playerData.diff || "medium",
     };
-
+    
     this.players.set(socketId, player);
     this.playersById.set(player.id, player);
 
