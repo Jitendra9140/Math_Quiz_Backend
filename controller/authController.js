@@ -20,7 +20,7 @@ function generateOTP() {
 }
 
 exports.sendVerificationMail = async (req, res, next) => {
-  console.log('req', req)
+  console.log('req', req.body)
   try {
     const { email } = req.body;
 
