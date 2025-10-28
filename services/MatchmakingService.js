@@ -130,7 +130,7 @@ class MatchmakingService {
     console.log('playermangaer', this.playerManager);
 
     const allOpponents = this.playerManager
-      .findPlayersInRatingRange(player.rating, 200)
+      .findPlayersInRatingRange(player.rating, 2000)
       .filter(
         (p) =>
           p.id !== player.id &&

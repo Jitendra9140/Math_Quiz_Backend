@@ -9,6 +9,7 @@ class PlayerManager {
   }
 
   addPlayer(socketId, playerData) {
+      console.log('socket id and player data in playerManager', socket.id, playerData )
     const player = {
       id: uuidv4(),
       socketId,
