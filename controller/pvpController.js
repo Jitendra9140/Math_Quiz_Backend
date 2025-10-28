@@ -18,8 +18,8 @@ module.exports = function registerSocketHandlers(io) {
     // Player joins the lobby
     socket.on('join-lobby', (playerData) => {
   try {
-    const player = playerManager.addPlayer(socket.id, playerData);
     console.log('socket id and player data in pvp', socket.id, playerData )
+    const player = playerManager.addPlayer(socket.id, playerData);
     socket.emit('lobby-joined', { success: true, player, tese: "pvp" });
 
     // Get list of opponents instead of auto match
