@@ -27,6 +27,8 @@ class PlayerManager {
 
     this.addToRatingGroup(player);
 
+    console.log("player", player)
+
     return player;
   }
 

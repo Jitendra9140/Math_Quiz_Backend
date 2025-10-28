@@ -127,6 +127,7 @@ class MatchmakingService {
   /** Get a list of potential opponents for a player */
   findPotentialOpponents(player) {
     console.log(`Finding potential opponents for player ${player.id}`);
+    console.log('playermangaer', this.playerManager);
 
     const allOpponents = this.playerManager
       .findPlayersInRatingRange(player.rating, 200)
@@ -137,6 +138,8 @@ class MatchmakingService {
           p.timer === player.timer &&
           p.diff === player.diff
       );
+
+      console.log('all opponents', allOpponents);
 
     // Sort by closest rating
     allOpponents.sort(
