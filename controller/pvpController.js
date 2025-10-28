@@ -16,67 +16,70 @@ module.exports = function registerSocketHandlers(io) {
     console.log(`Player connected: ${socket.id}`);
 
     // Player joins the lobby
-    socket.on('join-lobby', (playerData) => {
-  try {
-    console.log('socket id and player data in pvp', socket.id, playerData )
-    const player = playerManager.addPlayer(socket.id, playerData);
-    socket.emit('lobby-joined', { success: true, player, tese: "pvp" });
 
-    // Get list of opponents instead of auto match
-    const opponents = matchmakingService.findPotentialOpponents(player);
-    socket.emit('potential-opponents', opponents);
+    // challenge player logic
+//     socket.on('join-lobby', (playerData) => {
+//   try {
+//     console.log('socket id and player data in pvp', socket.id, playerData )
+//     const player = playerManager.addPlayer(socket.id, playerData);
+//     socket.emit('lobby-joined', { success: true, player, tese: "pvp" });
 
-  } catch (error) {
-    socket.emit('error', { message: error.message });
-  }
-});
+//     // Get list of opponents instead of auto match
+//     const opponents = matchmakingService.findPotentialOpponents(player);
+//     socket.emit('potential-opponents', opponents);
 
-    // socket.on("join-lobby", (playerData) => {
-    //   try {
-    //     const player = playerManager.addPlayer(socket.id, playerData);
-    //     socket.emit("lobby-joined", { success: true, player });
-    //     console.log('player joined lobby', playerData)
+//   } catch (error) {
+//     socket.emit('error', { message: error.message });
+//   }
+// });
 
-    //     // Start matchmaking
-    //     matchmakingService.findMatch(player, (gameRoom) => {
-    //       console.log('match found')
-    //       matchmakingService.removeFromQueue(player);
-    //       console.log(gameRoom.getOpposingPlayer(player.id))
-    //       matchmakingService.removeFromQueue(
-    //         gameRoom.getOpposingPlayer(player.id)
-    //       );
+// auto match logic
+    socket.on("join-lobby", (playerData) => {
+      try {
+        const player = playerManager.addPlayer(socket.id, playerData);
+        socket.emit("lobby-joined", { success: true, player });
+        console.log('player joined lobby', playerData)
 
-    //       console.log('before gameroom player get call');
-    //       // Notify both players about the match
-    //       const players = gameRoom.getPlayers();
-    //       console.log(players)
-    //       players.forEach((p) => {
-    //         console.log(p)
-    //         io.to(p.socketId).emit("match-found", {
-    //           gameRoom: gameRoom.getPublicData(),
-    //           opponent: players.find((player) => player.id !== p.id),
-    //           initialQuestionMeter: gameRoom.questionMeter,
-    //         });
-    //         console.log('match found')
-    //       });
+        // Start matchmaking
+        matchmakingService.findMatch(player, (gameRoom) => {
+          console.log('match found')
+          matchmakingService.removeFromQueue(player);
+          console.log(gameRoom.getOpposingPlayer(player.id))
+          matchmakingService.removeFromQueue(
+            gameRoom.getOpposingPlayer(player.id)
+          );
 
-    //       // Start the game after a brief delay
-    //       setTimeout(() => {
-    //         gameRoom.startGame();
-    //         console.log('GAME STARTED')
-    //         players.forEach((p) => {
+          console.log('before gameroom player get call');
+          // Notify both players about the match
+          const players = gameRoom.getPlayers();
+          console.log(players)
+          players.forEach((p) => {
+            console.log(p)
+            io.to(p.socketId).emit("match-found", {
+              gameRoom: gameRoom.getPublicData(),
+              opponent: players.find((player) => player.id !== p.id),
+              initialQuestionMeter: gameRoom.questionMeter,
+            });
+            console.log('match found')
+          });
+
+          // Start the game after a brief delay
+          setTimeout(() => {
+            gameRoom.startGame();
+            console.log('GAME STARTED')
+            players.forEach((p) => {
       
-    //           io.to(p.socketId).emit("game-started", {
-    //             gameState: gameRoom.getGameState(),
-    //             currentQuestion: gameRoom.getCurrentQuestion(),
-    //           });
-    //         });
-    //       }, 3000);
-    //     });
-    //   } catch (error) {
-    //     socket.emit("error", { message: error.message });
-    //   }
-    // });
+              io.to(p.socketId).emit("game-started", {
+                gameState: gameRoom.getGameState(),
+                currentQuestion: gameRoom.getCurrentQuestion(),
+              });
+            });
+          }, 3000);
+        });
+      } catch (error) {
+        socket.emit("error", { message: error.message });
+      }
+    });
 
     // Player submits an answer
     // socket.on("submit-answer", (data) => {
