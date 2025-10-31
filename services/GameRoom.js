@@ -656,7 +656,9 @@ class GameRoom {
   submitAnswer(playerId, answer, timeSpent) {
     console.log("at line no. 601, inside submit answer");
     if (this.gameState !== "active") throw new Error("Game not active");
+    console.log("at line no. 602, inside submit answer");
     const idx = this.playerProgress.get(playerId) - 1;
+    console.log("at line no. 603, inside submit answer");
     const q = this.questions[idx];
     console.log("question after submitting the answer : ", q);
     if (!q) throw new Error("No question found");
