@@ -161,11 +161,12 @@ module.exports = function registerSocketHandlers(io) {
          console.log(data)
         // const player = playerManager.getPlayer(data.userName);
         const player = playerManager.getPlayer(socket.id);
-        console.log(player, socket.id)
+        console.log('submit answer',player, socket.id)
         if (!player) throw new Error("Player not found");
-
+        
         const gameRoom = gameRoomManager.getPlayerGameRoom(player.id);
         if (!gameRoom) throw new Error("Game room not found");
+        console.log("submit answer game room:", gameRoom)
 
         // 1) Record the answer and QM changes
         const result = gameRoom.submitAnswer(

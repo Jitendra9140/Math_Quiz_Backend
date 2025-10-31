@@ -410,6 +410,7 @@
 // services/GameRoom.js
 const { v4: uuidv4 } = require("uuid");
 const Player = require("../models/Player");
+const PVPGame = require("../models/PVPGame");
 
 async function updatePlayerRatingInDatabase(player_username, ratings, diff) {
   try {
