@@ -655,6 +655,8 @@ class GameRoom {
 
   submitAnswer(playerId, answer, timeSpent) {
     console.log("at line no. 601, inside submit answer");
+    console.log("gamestate:", this.gameState );
+
     if (this.gameState !== "active") throw new Error("Game not active");
     console.log("at line no. 602, inside submit answer");
     const idx = this.playerProgress.get(playerId) - 1;
