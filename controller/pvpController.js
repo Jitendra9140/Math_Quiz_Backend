@@ -40,11 +40,11 @@ module.exports = function registerSocketHandlers(io) {
         socket.emit("lobby-joined", { success: true, player });
         console.log('player joined lobby', playerData)
 
-        // Start matchmakin
+        // Start matchmaking
         matchmakingService.findMatch(player, (gameRoom) => {
           console.log('match found')
           matchmakingService.removeFromQueue(player);
-          console.log('opponents',gameRoom.getOpposingPlayer(player.id))
+          console.log(gameRoom.getOpposingPlayer(player.id))
           matchmakingService.removeFromQueue(
             gameRoom.getOpposingPlayer(player.id)
           );
