@@ -40,7 +40,7 @@ module.exports = function registerSocketHandlers(io) {
         socket.emit("lobby-joined", { success: true, player });
         console.log('player joined lobby', playerData)
 
-        // Start matchmaking
+        // Start matchmakin
         matchmakingService.findMatch(player, (gameRoom) => {
           console.log('match found')
           matchmakingService.removeFromQueue(player);
@@ -62,7 +62,7 @@ module.exports = function registerSocketHandlers(io) {
             });
             console.log('match found')
           });
-          
+
           // Start the game after a brief delay
           setTimeout(() => {
             gameRoom.startGame();
