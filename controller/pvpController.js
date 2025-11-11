@@ -44,7 +44,7 @@ module.exports = function registerSocketHandlers(io) {
         matchmakingService.findMatch(player, (gameRoom) => {
           console.log('match found')
           matchmakingService.removeFromQueue(player);
-          console.log(gameRoom.getOpposingPlayer(player.id))
+          console.log('opponents',gameRoom.getOpposingPlayer(player.id))
           matchmakingService.removeFromQueue(
             gameRoom.getOpposingPlayer(player.id)
           );
