@@ -62,7 +62,7 @@ module.exports = function registerSocketHandlers(io) {
             });
             console.log('match found')
           });
-
+          
           // Start the game after a brief delay
           setTimeout(() => {
             gameRoom.startGame();
