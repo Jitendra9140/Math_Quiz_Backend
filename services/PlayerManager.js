@@ -82,27 +82,29 @@ class PlayerManager {
     return Math.floor(rating / 200) * 200;
   }
 
-  findPlayersInRatingRange(targetRating, maxDifference = 200) {
-    const players = [];
-    const minRating = targetRating - maxDifference;
-    const maxRating = targetRating + maxDifference;
+  findPlayersInRatingRange(targetRating, maxDifference = 200, excludePlayerId = null) {
+  const players = [];
+  const minRating = targetRating - maxDifference;
+  const maxRating = targetRating + maxDifference;
 
-    for (const [ratingRange, playerSet] of this.playersByRating) {
-      if (ratingRange >= minRating && ratingRange <= maxRating) {
-        for (const player of playerSet) {
-          if (
-            !player.isInGame &&
-            player.rating >= minRating &&
-            player.rating <= maxRating
-          ) {
-            players.push(player);
-          }
+  for (const [ratingRange, playerSet] of this.playersByRating) {
+    if (ratingRange >= minRating && ratingRange <= maxRating) {
+      for (const player of playerSet) {
+        if (
+          player.id !== excludePlayerId &&          // 🧩 Exclude self
+          !player.isInGame &&
+          player.rating >= minRating &&
+          player.rating <= maxRating
+        ) {
+          players.push(player);
         }
       }
     }
-
-    return players;
   }
+
+  return players;
+}
+
 
   updatePlayerRatings(gameResults) {
     gameResults.forEach((result) => {
