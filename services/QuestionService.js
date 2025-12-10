@@ -10,7 +10,7 @@ class QuestionService {
     console.log("[Startup] Preloading questions from Excel...");
     try {
       const data = getQuestions();
-      console.log(`[Startup] Preloaded ${data.length} questions`);
+      // console.log(`[Startup] Preloaded ${data.length} questions`);
 
       const cache = new Map();
       data.forEach((question) => {
@@ -33,8 +33,8 @@ class QuestionService {
         stats.byFinalLevel[q.finalLevel] = (stats.byFinalLevel[q.finalLevel] || 0) + 1;
       });
 
-      console.log("[Startup] Questions by difficulty:", stats.byDifficulty);
-      console.log("[Startup] Questions by final level:", stats.byFinalLevel);
+      // console.log("[Startup] Questions by difficulty:", stats.byDifficulty);
+      // console.log("[Startup] Questions by final level:", stats.byFinalLevel);
     } catch (error) {
       console.error("[Startup] Error preloading questions:", error);
     }

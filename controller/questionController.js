@@ -420,8 +420,8 @@ function preloadQuestions() {
         (stats.byFinalLevel[q.finalLevel] || 0) + 1;
     });
 
-    console.log("[Startup] Questions by difficulty:", stats.byDifficulty);
-    console.log("[Startup] Questions by final level:", stats.byFinalLevel);
+    // console.log("[Startup] Questions by difficulty:", stats.byDifficulty);
+    // console.log("[Startup] Questions by final level:", stats.byFinalLevel);
   } catch (error) {
     console.error("[Startup] Error preloading questions:", error);
   }

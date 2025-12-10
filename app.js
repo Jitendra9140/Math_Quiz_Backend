@@ -2,17 +2,23 @@ const express = require('express');
 const http = require('http');
 const mongoose = require('mongoose');
 const cors = require('cors');
+const path = require("path");
 require('dotenv').config();
 
 // import routes and controllers
 const authRoutes = require('./routes/auth');
 const questionRoutes = require('./routes/question');
-// const matchRoutes = require('./routes/match');
+const matchRoutes = require('./routes/match');
 const practiceMatchRoutes = require('./routes/practicematch');
 const friendRoutes = require('./routes/friend')
 
+
+
+
 const app = express();
 const server = http.createServer(app);
+
+app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 
 // initialize Socket.IO
 const { Server } = require('socket.io');
@@ -33,7 +39,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/question', questionRoutes);
 app.use('/api/practice', practiceMatchRoutes)
 app.use('/api/friend', friendRoutes)
-// app.use('/api/match', matchRoutes);
+app.use('/api/match', matchRoutes);
 require('./controller/pvpController')(io);
 
 app.get('/', (req, res) =>{
@@ -44,11 +50,12 @@ app.get('/', (req, res) =>{
 } );
 
 
+
 // handle mongoose connection and server start
 mongoose.connect(process.env.MONGO_URI)
   .then(() => {
-    server.listen(3000, () => {
-      console.log('Server is running on port 3000');
+    server.listen(process.env.port, () => {
+      console.log(`Server is running on port ${process.env.port}`);
     });
   })
   .catch(err => console.error('Mongo connection error:', err));

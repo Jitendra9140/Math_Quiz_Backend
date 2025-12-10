@@ -2,69 +2,76 @@ const mongoose = require('mongoose');
 const bcrypt = require('bcrypt');
 
 
-const playerSchema = new mongoose.Schema({
-  username: {
-    type: String,
-    required: true,
-    unique: true,
-    trim: true,
-  },
-  email: {
-    type: String,
-    required: true,
-    unique: true,
-    lowercase: true,
-    trim: true,
-  },
-  // we'll store a bcrypt‑hashed password here
-  password: {
-    type: String,
-    required: true,
-    minlength: 6,
-  },
-  gender : {
-    type : String, 
-    enum : ["male", "female", "other"],
-    required : false
-  },
-  country: {
-    type: String,
-    required: false,
-    trim: true,
-  },
-  dateOfBirth: {
-    type: Date,
-    required: false,
-  },
-  // "PR" = personal record / high score
-  pr: {
-    practice: {
-      easy:   { type: Number, default: 1000 },
-      medium: { type: Number, default: 1000 },
-      hard:   { type: Number, default: 1000 },
-    },
-    pvp: {
-      easy:   { type: Number, default: 1000 },
-      medium: { type: Number, default: 1000 },
-      hard:   { type: Number, default: 1000 },
-    }
-  },
-  // firebase message token
-    fcmToken:{
+const playerSchema = new mongoose.Schema(
+  {
+    username: {
       type: String,
-      required: false
-    }
-  // friends:[{
-  //   type: mongoose.Schema.Types.ObjectId,
-  //   ref: "Player",
-  //   required: false
-  // }],
-  // friendRequest:[{
-  //   type: mongoose.Schema.Types.ObjectId,
-  //   ref: "Player",
-  //   required: false
-  // }]
-}, { timestamps: true });
+      required: true,
+      unique: true,
+      trim: true,
+    },
+    email: {
+      type: String,
+      required: true,
+      unique: true,
+      lowercase: true,
+      trim: true,
+    },
+    // we'll store a bcrypt‑hashed password here
+    password: {
+      type: String,
+      required: true,
+      minlength: 6,
+    },
+    gender: {
+      type: String,
+      enum: ["male", "female", "other"],
+      required: false,
+    },
+    country: {
+      type: String,
+      required: false,
+      trim: true,
+    },
+    dateOfBirth: {
+      type: Date,
+      required: false,
+    },
+    profileImage: {
+      type: String,
+      default: null,
+    },
+    // "PR" = personal record / high score
+    pr: {
+      practice: {
+        easy: { type: Number, default: 1000 },
+        medium: { type: Number, default: 1000 },
+        hard: { type: Number, default: 1000 },
+      },
+      pvp: {
+        easy: { type: Number, default: 1000 },
+        medium: { type: Number, default: 1000 },
+        hard: { type: Number, default: 1000 },
+      },
+    },
+    // firebase message token
+    fcmToken: {
+      type: String,
+      required: false,
+    },
+    // friends:[{
+    //   type: mongoose.Schema.Types.ObjectId,
+    //   ref: "Player",
+    //   required: false
+    // }],
+    // friendRequest:[{
+    //   type: mongoose.Schema.Types.ObjectId,
+    //   ref: "Player",
+    //   required: false
+    // }]
+  },
+  { timestamps: true }
+);
 
 
 

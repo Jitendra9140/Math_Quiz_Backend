@@ -8,7 +8,6 @@ class MatchmakingService {
 
   findMatch(player, onMatchFound) {
     console.log('finding match')
-    
     // Add player to matchmaking queue
     this.matchmakingQueue.set(player.id, {
       player,
