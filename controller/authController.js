@@ -277,6 +277,12 @@ exports.resendSignupOTP = async (req, res) => {
 exports.login = async (req, res) => {
   const { email, password } = req.body;
   try {
+
+    if (!email || !password) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Email and password are required." });
+    }
     console.log("Login attempt with password:", password); // Debug log
 
     // 1. Find player by email
