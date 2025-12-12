@@ -18,7 +18,7 @@ exports.signup = async (req, res) => {
 
   try {
     if (
-      !username ||!email ||!password ||!country ||!dateOfBirth ||!gender ) {
+      !username ||!email ||!password) {
       return res.status(400).json({ message: "All fields are required" });
     }
 
