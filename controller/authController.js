@@ -7,14 +7,6 @@ const { sendEmail } = require("../middleware/mail");
 const otpStore = new Map();
 const passOtpStore = new Map();
 
-const transporter = nodemailer.createTransport({
-  service: "gmail",
-  auth: {
-    user: "developer.clumpcoder@gmail.com",
-    pass: "xnuz wias bwnt psrw",
-  },
-});
-
 function generateOTP() {
   return crypto.randomInt(100000, 999999).toString();
 }
