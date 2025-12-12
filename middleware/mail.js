@@ -31,7 +31,7 @@ const sendEmail = async (options) => {
   try {
     const mailOptions = {
       from: `Clumpcoder <${
-        process.env.EMAIL_USER || "developer.clumpcoder@gmail.com"
+        process.env.EMAIL_USER
       }>`,
       to: options.to,
       subject: options.subject,
@@ -40,7 +40,7 @@ const sendEmail = async (options) => {
     };
 
     const info = await transporter.sendMail(mailOptions);
-    console.log(info)
+    // console.log(info)
 
     console.log("Email sent successfully:", options.to);
     return info;

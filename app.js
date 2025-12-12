@@ -13,8 +13,6 @@ const practiceMatchRoutes = require('./routes/practicematch');
 const friendRoutes = require('./routes/friend')
 
 
-
-
 const app = express();
 const server = http.createServer(app);
 

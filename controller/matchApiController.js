@@ -289,8 +289,9 @@ exports.listRequests = async (req, res) => {
       type === "outgoing"
         ? { requester: req.user._id }
         : { recipient: req.user._id };
-
-    const requests = await MatchRequest.find(filter)
+     
+    const oneDayAgo = Date.now() - 24 * 60 * 60 * 1000;    
+    const requests = await MatchRequest.find({...filter, createdAt:{ $gte: oneDayAgo }})
       .sort({ createdAt: -1 })
       .populate("requester", "username")
       .populate("recipient", "username")

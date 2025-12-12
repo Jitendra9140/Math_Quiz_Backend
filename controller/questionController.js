@@ -84,7 +84,7 @@ exports.getQuestion = (req, res) => {
     .toLowerCase();
   const rawSymbols = req.query.symbol;
   const rating = Number(req.query.playerRating);
-  const qm = req.query.qm !== undefined ? Number(req.query.qm) : null;
+  let qm = req.query.qm !== undefined ? Number(req.query.qm) : null;
 
   // Parse symbol parameter (comma-separated or single)
   const symbolList = rawSymbols
@@ -133,7 +133,7 @@ exports.getQuestion = (req, res) => {
         { level: 10, start: 38, end: 45 },
       ];
 
-      const range = qmRanges.find((r) => r.level === level);
+      const range = qmRanges.find((r) => r.level === targetFinalLevel);
       qm = range ? range.start : 0;
     }
     console.log(

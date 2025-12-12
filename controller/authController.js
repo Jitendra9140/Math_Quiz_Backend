@@ -25,6 +25,16 @@ exports.signup = async (req, res) => {
   const { username, email, password, country, dateOfBirth, gender } = req.body;
 
   try {
+    if (
+      !username ||!email ||!password ||!country ||!dateOfBirth ||!gender ) {
+      return res.status(400).json({ message: "All fields are required" });
+    }
+
+    if (password.length < 6) {
+      return res.status(400).json({
+        message: "Password must be at least 6 characters long",
+      });
+    }
     // 1. Check for existing email or username
     let existing = await Player.findOne({ email });
     if (existing) {
@@ -34,6 +44,13 @@ exports.signup = async (req, res) => {
     if (existing) {
       return res.status(400).json({ message: "Username already taken" });
     }
+    if (!password || password.length < 6) {
+      return res.status(400).json({
+        message:
+          "Password is required and it should be at least 6 characters long",
+      });
+    }
+
 
     // 2. Generate and store OTP with attempt tracking
     const otp = generateOTP();
@@ -74,6 +91,7 @@ exports.signup = async (req, res) => {
     res.status(500).json({ message: "Server error", error: err.message });
   }
 };
+
 // POST /api/auth/verify-signup-otp
 exports.verifySignupOTP = async (req, res) => {
   const { email, otp } = req.body;
