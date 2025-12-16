@@ -3,7 +3,7 @@ const router = express.Router();
 const authController = require('../controller/authController');
 const auth = require('../middleware/auth');
 const profileController = require("../controller/profileController");
-const { upload, handleMulterError } = require("../config/multerConfig");
+const { uploadToMemory, handleMulterError } = require("../config/multerConfig");
 const { uploadToS3 } = require("../config/multerConfig");
 
 //login
@@ -21,11 +21,16 @@ router.post("/changePass", authController.changePassword);
 router.post('/resend-forget-otp',authController.resendForgotPasswordOtp)
 
 //Update Propfile
-router.put( "/profile", auth, upload.single("profileImage"), handleMulterError,profileController.updateProfile);
-router.delete("/profile/image", auth, profileController.deleteProfileImage);
+// router.put( "/profile", auth, upload.single("profileImage"), handleMulterError,profileController.updateProfile);
+// router.delete("/profile/image", auth, profileController.deleteProfileImage);
 
 //Update profile using S3 Bucket
-// router.put("/profile", auth, uploadToS3.single("profileImage"), updateProfile);
+router.put(
+  "/profile",
+  auth,
+  uploadToMemory.single("profileImage"),
+  profileController.updateProfile
+);
 // router.delete("/profile/image", auth, profileController.deleteProfileImage);
 
 //Get information

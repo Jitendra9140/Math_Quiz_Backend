@@ -4,8 +4,8 @@ const nodemailer = require("nodemailer");
 const transporter = nodemailer.createTransport({
   service: "gmail",
   auth: {
-    user: process.env.EMAIL_USER || "developer.clumpcoder@gmail.com",
-    pass: process.env.EMAIL_PASS || "xnuz wias bwnt psrw",
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASS
   },
 });
 
@@ -50,9 +50,9 @@ const sendEmail = async (options) => {
   }
 };
 
-/**
- * Send OTP email
- */
+
+//  Send OTP email
+ 
 const sendOTPEmail = async (email, otp, type = "verification") => {
   const subjects = {
     verification: "Email Verification OTP - Clumpcoder",
