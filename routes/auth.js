@@ -20,9 +20,10 @@ router.post("/verfy-forget-otp", authController.verifyForgotPasswordOtp);
 router.post("/changePass", authController.changePassword);
 router.post('/resend-forget-otp',authController.resendForgotPasswordOtp)
 
-//Update Propfile
-// router.put( "/profile", auth, upload.single("profileImage"), handleMulterError,profileController.updateProfile);
-// router.delete("/profile/image", auth, profileController.deleteProfileImage);
+
+//
+router.delete("/admin/delete-user/:userId", authController.deleteUserByAdmin);
+
 
 //Update profile using S3 Bucket
 router.put(

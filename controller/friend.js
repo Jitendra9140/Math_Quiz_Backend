@@ -4,27 +4,24 @@ const admin = require("../config/firebase");
 
 exports.addFriend = async (req, res) => {
   try {
-    //   const { _id:userId, friends, friendRequest  } = req.user
-    const { requester, recipient, status = "pending" } = req.body;
+    const requester = req.user._id; // ✅ from token
+    const { recipient } = req.body;
 
-    if (!requester || !recipient) {
-      return res.status(404).json({
+    if (!recipient) {
+      return res.status(400).json({
         success: false,
-        message: "requester or recipient is missing",
+        message: "Recipient is missing",
       });
     }
 
-    // console.log("req user", req.user);
-
-    if (requester == recipient) {
+    if (requester.toString() === recipient) {
       return res.status(400).json({
         success: false,
-        message: "you cannot add yourself as friend",
+        message: "You cannot add yourself as friend",
       });
     }
 
     const existUser = await Player.findById(recipient);
-
     if (!existUser) {
       return res.status(404).json({
         success: false,
@@ -32,55 +29,48 @@ exports.addFriend = async (req, res) => {
       });
     }
 
-    // check if user is already a dost friend
-
-    const alreadyFrnd = await Friend.findOne({
+    // Already friends?
+    const alreadyFriend = await Friend.findOne({
       $or: [
         { requester, recipient, status: "accepted" },
         { requester: recipient, recipient: requester, status: "accepted" },
       ],
     });
 
-    console.log("alrdyfrnd", alreadyFrnd);
-
-    if (alreadyFrnd) {
+    if (alreadyFriend) {
       return res.status(400).json({
         success: false,
-        message: "You are already friend with the user",
+        message: "You are already friends",
       });
     }
 
-    // check if user is already sent dost request
-
-    const alreadyFrndReq = await Friend.findOne({
+    // Already requested?
+    const alreadyRequested = await Friend.findOne({
       $or: [
         { requester, recipient, status: "pending" },
         { requester: recipient, recipient: requester, status: "pending" },
       ],
     });
 
-    console.log("alrdyfrndrqst", alreadyFrndReq);
-
-    if (alreadyFrndReq) {
+    if (alreadyRequested) {
       return res.status(400).json({
         success: false,
-        message: "You have already sent or recived friend request to/from user",
+        message: "Friend request already exists",
       });
     }
 
-    const response = await Friend.create({
+    await Friend.create({
       requester,
       recipient,
       status: "pending",
     });
 
+    // Push notification
     const receiver = await Player.findById(recipient);
     const sender = await Player.findById(requester);
 
-    console.log("receiver sender", receiver, sender);
-
     if (receiver?.fcmToken) {
-      const payload = {
+      await admin.messaging().send({
         token: receiver.fcmToken,
         notification: {
           title: "New Friend Request 🎉",
@@ -88,20 +78,15 @@ exports.addFriend = async (req, res) => {
         },
         data: {
           type: "FRIEND_REQUEST",
-          requester,
-          recipient,
+          requester: requester.toString(),
+          recipient: recipient.toString(),
         },
-      };
-
-      const notificationres = await admin.messaging().send(payload);
-      console.log("Notification sent successfully", notificationres);
-    } else {
-      console.log("Receiver has no FCM token");
+      });
     }
 
     return res.status(200).json({
       success: true,
-      message: "friend request sent",
+      message: "Friend request sent",
     });
   } catch (error) {
     console.log("error:", error);
@@ -111,6 +96,7 @@ exports.addFriend = async (req, res) => {
     });
   }
 };
+
 
 exports.acceptFrndRequest = async (req, res) => {
   try {
@@ -318,34 +304,50 @@ exports.userList = async (req, res) => {
   const { _id } = req.user;
 
   try {
-    // Fetch all users except current one
+    // Exclude current user
     const query = { _id: { $ne: _id } };
 
     const users = await Player.find(query).select(
-      "username email gender country"
+      "username email firstName lastName  gender country profileImage pr"
     );
 
-    // Get all friendship relationships involving this user
+    // Get friendships
     const friendships = await Friend.find({
       $or: [{ requester: _id }, { recipient: _id }],
     });
 
-    // Create a map for quick lookup
+    // Friendship map
     const friendshipMap = {};
     friendships.forEach((f) => {
       const otherUserId =
         f.requester.toString() === _id.toString()
           ? f.recipient.toString()
           : f.requester.toString();
-      friendshipMap[otherUserId] = f.status; // "pending" | "accepted" | "rejected" | "blocked"
+
+      friendshipMap[otherUserId] = f.status;
     });
 
-    // Attach friendship status to each user
+    // Build response
     const userList = users.map((user) => {
-      const status = friendshipMap[user._id.toString()] || "none";
+      const u = user.toObject();
+
+      // Convert PR object → array
+      const prArray = Object.entries(u.pr || {}).map(([mode, levels]) => ({
+        mode,
+        ...levels,
+      }));
+
       return {
-        ...user.toObject(),
-        friendshipStatus: status,
+        _id: u._id,
+        username: u.username,
+        email: u.email,
+        firstName:u.firstName,
+        lastName:u.lastName,
+        gender: u.gender,
+        country: u.country,
+        profileImage: u.profileImage,
+        pr: prArray,
+        friendshipStatus: friendshipMap[u._id.toString()] || "none",
       };
     });
 

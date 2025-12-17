@@ -11,6 +11,13 @@ function generateOTP() {
   return crypto.randomInt(100000, 999999).toString();
 }
 
+const { deleteFromS3 } = require("../config/s3Config");
+
+const getS3KeyFromUrl = (url) => {
+  if (!url) return null;
+  const parts = url.split(".amazonaws.com/");
+  return parts.length > 1 ? parts[1] : null;
+};
 
 // POST /api/auth/signup
 exports.signup = async (req, res) => {
@@ -321,6 +328,50 @@ exports.login = async (req, res) => {
     res.status(500).json({ message: "Server error", error: err.message });
   }
 };
+
+
+exports.deleteUserByAdmin = async (req, res) => {
+  try {
+    const { userId } = req.params;
+
+
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        message: "User ID is required",
+      });
+    }
+
+    const user = await Player.findById(userId);
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
+    }
+
+    if (user.profileImage) {
+      const s3Key = getS3KeyFromUrl(user.profileImage);
+      if (s3Key) {
+        await deleteFromS3(s3Key);
+      }
+    }
+
+    await Player.findByIdAndDelete(userId);
+
+    return res.status(200).json({
+      success: true,
+      message: "User deleted successfully",
+    });
+  } catch (error) {
+    console.error("Admin delete user error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Server error",
+    });
+  }
+};
+
 
 // POST /api/auth/sendForgotPassOtp
 exports.sendForgotPasswordOtp = async (req, res) => {
