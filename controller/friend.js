@@ -68,6 +68,7 @@ exports.addFriend = async (req, res) => {
     // Push notification
     const receiver = await Player.findById(recipient);
     const sender = await Player.findById(requester);
+    
 
     if (receiver?.fcmToken) {
       await admin.messaging().send({
@@ -365,22 +366,18 @@ exports.userList = async (req, res) => {
 };
 
 exports.friendRequestList = async (req, res) => {
-  const { _id } = req.user;
+  const { _id } = req.user; // logged-in user (recipient)
 
   try {
     const requests = await Friend.find({
       recipient: _id,
       status: "pending",
     })
-      .populate("requester", "username email gender country")
-      .sort({ createdAt: -1 }); // newest first
-
-    // if (!requests || requests.length === 0) {
-    //   return res.status(404).json({
-    //     success: false,
-    //     message: "No friend requests received",
-    //   });
-    // }
+      .populate({
+        path: "requester",
+        select: "username email firstName lastName  gender country profileImage",
+      })
+      .sort({ createdAt: -1 });
 
     return res.status(200).json({
       success: true,
@@ -395,6 +392,7 @@ exports.friendRequestList = async (req, res) => {
     });
   }
 };
+
 
 exports.deleteFriendship = async (req, res) => {
   const { _id } = req.user; // logged-in user

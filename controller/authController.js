@@ -699,7 +699,7 @@ exports.allUserList = async (req, res) => {
 // POST /api/auth/save-fcmToken
 exports.saveFcmToken = async(req, res) =>{
   try {
-    const {fcmToken} = req.body;
+    const {fcmToken} =req.body;
     const { _id } = req.user;
     
     if(!fcmToken){
@@ -724,7 +724,9 @@ exports.saveFcmToken = async(req, res) =>{
   }
 }
 
+
 // POST /api/auth/getuser
+
 exports.getUser = async (req, res) => {
   const { _id } = req.user; 
   try {
