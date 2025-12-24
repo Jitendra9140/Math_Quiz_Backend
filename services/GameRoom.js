@@ -666,6 +666,33 @@ class GameRoom {
       ),
     };
   }
+
+  getPlayers() {
+    return this.players;
+  }
+
+  getOpposingPlayer(playerId) {
+    return this.players.find((p) => p.id !== playerId) || null;
+  }
+
+  getCurrentQuestion() {
+    return this.questions[this.questions.length - 1] || null;
+  }
+
+  getPublicData() {
+    return {
+      id: this.id,
+      players: this.players.map((p) => ({
+        id: p.id,
+        username: p.username,
+        rating: p.rating,
+      })),
+      createdAt: this.createdAt,
+      gameState: this.gameState,
+      questionMeter: this.questionMeter,
+      difficulty: this.difficulty,
+    };
+  }
 }
 
 module.exports = { GameRoom };
