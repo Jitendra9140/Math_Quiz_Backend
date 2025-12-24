@@ -1,4 +1,4 @@
-MatchmakingService {
+ class MatchmakingService {
   constructor(playerManager, gameRoomManager) {
     this.playerManager = playerManager;
     this.gameRoomManager = gameRoomManager;
