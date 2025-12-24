@@ -288,6 +288,10 @@ module.exports = function registerSocketHandlers(io) {
         });
 
         console.log("✅ Player joined lobby:", player.id);
+        console.log(
+          "📊 Current queue status:",
+          matchmakingService.getQueueStatus()
+        ); // DEBUG
 
         // Start matchmaking
         matchmakingService.findMatch(player, (gameRoom) => {
@@ -301,6 +305,10 @@ module.exports = function registerSocketHandlers(io) {
           const players = gameRoom.getPlayers();
           players.forEach((p) => {
             const otherPlayer = players.find((pl) => pl.id !== p.id);
+
+            console.log(
+              `📤 Sending match-found to ${p.username} (${p.socketId})`
+            ); // DEBUG
 
             // ✅ Send complete player data with MongoDB IDs
             io.to(p.socketId).emit("match-found", {
@@ -321,6 +329,10 @@ module.exports = function registerSocketHandlers(io) {
             console.log("🚀 GAME STARTED");
 
             players.forEach((p) => {
+              console.log(
+                `📤 Sending game-started to ${p.username} (${p.socketId})`
+              ); // DEBUG
+
               io.to(p.socketId).emit("game-started", {
                 gameState: gameRoom.getGameState(),
                 currentQuestion: gameRoom.getCurrentQuestion(),
@@ -332,6 +344,22 @@ module.exports = function registerSocketHandlers(io) {
       } catch (error) {
         console.error("❌ join-lobby error:", error);
         socket.emit("error", { message: error.message });
+      }
+    });
+
+    socket.on("cancel_search", () => {
+      try {
+        const player = playerManager.getPlayer(socket.id);
+        if (player) {
+          matchmakingService.removeFromQueue(player);
+          console.log("❌ Player cancelled search:", player.id);
+          console.log(
+            "📊 Queue after cancellation:",
+            matchmakingService.getQueueStatus()
+          ); // DEBUG
+        }
+      } catch (error) {
+        console.error("❌ cancel_search error:", error);
       }
     });
 
@@ -404,6 +432,10 @@ module.exports = function registerSocketHandlers(io) {
       if (player) {
         // Remove from matchmaking queue
         matchmakingService.removeFromQueue(player);
+        console.log(
+          "📊 Queue after disconnect:",
+          matchmakingService.getQueueStatus()
+        ); // DEBUG
 
         // Handle game room disconnection
         const gameRoom = gameRoomManager.getPlayerGameRoom(player.id);

@@ -3,21 +3,24 @@ class MatchmakingService {
     this.playerManager = playerManager;
     this.gameRoomManager = gameRoomManager;
     this.matchmakingQueue = new Map(); // playerId -> { player, searchStartTime, maxRatingDiff }
-    this.matchmakingInterval = setInterval(() => this.processMatchmaking(), 2000);
+    this.matchmakingInterval = setInterval(
+      () => this.processMatchmaking(),
+      2000
+    );
   }
 
   findMatch(player, onMatchFound) {
-    console.log('finding match')
+    console.log("finding match");
     // Add player to matchmaking queue
     this.matchmakingQueue.set(player.id, {
       player,
       searchStartTime: Date.now(),
       maxRatingDiff: 100, // Start with strict matching
-      onMatchFound
+      onMatchFound,
     });
 
     player.isInGame = false;
-    
+
     // Try immediate matching
     this.tryMatchPlayer(player.id);
   }
@@ -42,12 +45,13 @@ class MatchmakingService {
     // Find potential opponents
     const potentialOpponents = this.playerManager
       .findPlayersInRatingRange(player.rating, maxRatingDiff)
-      .filter(p => 
-        p.id !== player.id && 
-        !p.isInGame && 
-        p.timer == player.timer && 
-        p.diff == player.diff && 
-        this.matchmakingQueue.has(p.id)
+      .filter(
+        (p) =>
+          p.id !== player.id &&
+          !p.isInGame &&
+          p.timer == player.timer &&
+          p.diff == player.diff &&
+          this.matchmakingQueue.has(p.id)
       );
 
     if (potentialOpponents.length > 0) {
@@ -60,7 +64,7 @@ class MatchmakingService {
 
       // Create game room
       const gameRoom = this.gameRoomManager.createGameRoom([player, opponent]);
-      
+
       // Mark players as in game
       player.isInGame = true;
       opponent.isInGame = true;
@@ -79,7 +83,7 @@ class MatchmakingService {
   }
 
   removeFromQueue(player) {
-    console.log('player removed from queue', player)
+    console.log("player removed from queue", player);
     this.matchmakingQueue.delete(player.id);
     player.isInGame = false;
   }
@@ -87,14 +91,26 @@ class MatchmakingService {
   getQueueSize() {
     return this.matchmakingQueue.size;
   }
-
+  getQueueStatus() {
+    return {
+      totalInQueue: this.matchmakingQueue.length,
+      players: this.matchmakingQueue.map((p) => ({
+        id: p.id,
+        username: p.username,
+        rating: p.rating,
+        diff: p.diff,
+      })),
+    };
+  }
   getAverageWaitTime() {
     if (this.matchmakingQueue.size === 0) return 0;
-    
+
     const now = Date.now();
-    const totalWaitTime = Array.from(this.matchmakingQueue.values())
-      .reduce((sum, queueData) => sum + (now - queueData.searchStartTime), 0);
-    
+    const totalWaitTime = Array.from(this.matchmakingQueue.values()).reduce(
+      (sum, queueData) => sum + (now - queueData.searchStartTime),
+      0
+    );
+
     return Math.round(totalWaitTime / this.matchmakingQueue.size / 1000);
   }
 
