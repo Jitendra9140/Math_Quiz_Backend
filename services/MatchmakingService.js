@@ -11,6 +11,7 @@
 
   findMatch(player, onMatchFound) {
     console.log("finding match");
+    console.log(player)
     // Add player to matchmaking queue
     this.matchmakingQueue.set(player.id, {
       player,
