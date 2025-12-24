@@ -1,4 +1,4 @@
-class MatchmakingService {
+MatchmakingService {
   constructor(playerManager, gameRoomManager) {
     this.playerManager = playerManager;
     this.gameRoomManager = gameRoomManager;
@@ -69,13 +69,15 @@ class MatchmakingService {
       player.isInGame = true;
       opponent.isInGame = true;
 
+      // Get opponent's callback BEFORE removing from queue
+      const opponentQueueData = this.matchmakingQueue.get(opponent.id);
+
       // Remove from matchmaking queue
       this.matchmakingQueue.delete(player.id);
       this.matchmakingQueue.delete(opponent.id);
 
       // Notify about match
       onMatchFound(gameRoom);
-      const opponentQueueData = this.matchmakingQueue.get(opponent.id);
       if (opponentQueueData) {
         opponentQueueData.onMatchFound(gameRoom);
       }
@@ -91,17 +93,23 @@ class MatchmakingService {
   getQueueSize() {
     return this.matchmakingQueue.size;
   }
+
+  // ✅ FIXED: Convert Map to Array before using .map()
   getQueueStatus() {
+    const playersArray = Array.from(this.matchmakingQueue.values());
     return {
-      totalInQueue: this.matchmakingQueue.length,
-      players: this.matchmakingQueue.map((p) => ({
-        id: p.id,
-        username: p.username,
-        rating: p.rating,
-        diff: p.diff,
+      totalInQueue: this.matchmakingQueue.size, // ✅ Use .size for Map, not .length
+      players: playersArray.map((queueData) => ({
+        id: queueData.player.id,
+        username: queueData.player.username,
+        rating: queueData.player.rating,
+        diff: queueData.player.diff,
+        waitTime: Math.round((Date.now() - queueData.searchStartTime) / 1000), // seconds waiting
+        maxRatingDiff: queueData.maxRatingDiff,
       })),
     };
   }
+
   getAverageWaitTime() {
     if (this.matchmakingQueue.size === 0) return 0;
 
@@ -121,7 +129,7 @@ class MatchmakingService {
   }
 }
 
-module.exports = {MatchmakingService}
+module.exports = { MatchmakingService };
 
 
 //  auto matching player logic ^
