@@ -408,23 +408,22 @@
 // module.exports = {GameRoom}
 
 // services/GameRoom.js
-const { v4: uuidv4 } = require("uuid");
 const Player = require("../models/Player");
 const PVPGame = require("../models/PVPGame");
 
-async function updatePlayerRatingInDatabase(player_username, ratings, diff) {
-  try {
-    const player = await Player.findOne({ username: player_username });
-    if (!player) {
-      throw new Error(`Player not found: ${player_username}`);
-    }
-    const current = player.pr.pvp[diff];
+/* ================================
+   DATABASE HELPERS (PLAYER ID)
+================================ */
 
-    // 7) Apply and save
-    player.pr.pvp[diff] = current + ratings;
+async function updatePlayerRatingInDatabase(playerId, delta, diff) {
+  try {
+    const player = await Player.findById(playerId);
+    if (!player) throw new Error(`Player not found: ${playerId}`);
+
+    player.pr.pvp[diff] += delta;
     await player.save();
 
-    return { player };
+    return player;
   } catch (err) {
     console.error("Error updating PvP rating:", err);
     throw err;
@@ -433,47 +432,32 @@ async function updatePlayerRatingInDatabase(player_username, ratings, diff) {
 
 async function savePVPGameToDatabase(gameData) {
   try {
-    // Find player ObjectIds by username
-    const player1 = await Player.findOne({
-      username: gameData.player1Username,
-    });
-    const player2 = await Player.findOne({
-      username: gameData.player2Username,
-    });
+    const { player1Id, player2Id, player1Score, player2Score, gameDuration } =
+      gameData;
 
-    if (!player1 || !player2) {
-      throw new Error("One or both players not found in database");
-    }
-
-    // Determine result
-    let result;
+    let result = "Draw";
     let winner = null;
 
-    if (gameData.player1Score > gameData.player2Score) {
+    if (player1Score > player2Score) {
       result = "Player1Won";
-      winner = player1._id;
-    } else if (gameData.player2Score > gameData.player1Score) {
+      winner = player1Id;
+    } else if (player2Score > player1Score) {
       result = "Player2Won";
-      winner = player2._id;
-    } else {
-      result = "Draw";
-      // winner remains null for draw
+      winner = player2Id;
     }
 
-    // Create new PVP game record
     const pvpGame = new PVPGame({
-      player1: player1._id,
-      player2: player2._id,
-      scorePlayer1: gameData.player1Score,
-      scorePlayer2: gameData.player2Score,
-      winner: winner,
-      result: result,
-      gameDuration: Math.floor(gameData.gameDuration / 1000), // Convert ms to seconds
+      player1: player1Id,
+      player2: player2Id,
+      scorePlayer1: player1Score,
+      scorePlayer2: player2Score,
+      winner,
+      result,
+      gameDuration: Math.floor(gameDuration / 1000),
       playedAt: new Date(),
     });
 
     await pvpGame.save();
-    console.log("PVP Game saved successfully:", pvpGame._id);
     return pvpGame;
   } catch (err) {
     console.error("Error saving PVP game:", err);
@@ -481,45 +465,45 @@ async function savePVPGameToDatabase(gameData) {
   }
 }
 
+/* ================================
+   GAME ROOM
+================================ */
+
 class GameRoom {
   constructor(players, questionService) {
-    this.id = uuidv4();
+    // ✅ NO UUID — playerId based room id
+    this.id = `${players[0].id}_${players[1].id}_${Date.now()}`;
+
     this.players = players;
-    this.currentQuestionIndex = 0;
     this.questionService = questionService;
     this.createdAt = Date.now();
-    this.gameState = "waiting"; // waiting, active, completed
+    this.gameState = "waiting";
 
-    // Track each player's progress index
     this.playerProgress = new Map(players.map((p) => [p.id, 0]));
-
-    // Shared questions array generated on demand
+    this.playerAnswers = new Map();
+    this.playerScores = new Map();
     this.questions = [];
-    this.playerAnswers = new Map(); // questionIndex -> Map(playerId -> answer data)
-    this.playerScores = new Map(); // playerId -> score data
 
     this.gameTimer = null;
     this.questionTimer = null;
 
-    // Question Meter System
     this.questionMeter = questionService.getInitialQuestionMeter(
       players[0].rating,
       players[1].rating
     );
-    this.questionMeterController = null;
 
+    this.questionMeterController = null;
     this.difficulty =
       players[0].rating > players[1].rating ? players[1].diff : players[0].diff;
+
     this.symbols = ["sum", "difference", "product", "quotient"];
 
     this.gameSettings = {
       questionsPerGame: 10,
-      timePerQuestion: 30000, // 30 seconds
-      totalGameTime: 60000, // 1 minutes
-      // totalGameTime: this.players[0].timer, // 1 minutes
+      timePerQuestion: 30000,
+      totalGameTime: 60000,
     };
 
-    // Initialize per-player score data
     players.forEach((player) => {
       this.playerScores.set(player.id, {
         score: 0,
@@ -532,347 +516,139 @@ class GameRoom {
     });
   }
 
-  getOpposingPlayer(playerId) {
-    return this.players.find((p) => p.id !== playerId);
-  }
-
-  getCurrentQuestion() {
-    console.log(
-      "current question : ",
-      this.questions[this.currentQuestionIndex]
-    );
-    return this.questions[this.currentQuestionIndex];
-  }
-
-  getPublicData() {
-    return {
-      id: this.id,
-      players: this.players.map((p) => ({
-        id: p.id,
-        username: p.username,
-        rating: p.rating,
-      })),
-      createdAt: this.createdAt,
-      gameState: this.gameState,
-      questionMeter: this.questionMeter,
-      difficulty: this.difficulty,
-    };
+  bindIO(io) {
+    this.io = io;
   }
 
   startGame() {
     this.gameState = "active";
-    // Start global game timer
     this.gameTimer = setTimeout(
       () => this.endGame(),
       this.gameSettings.totalGameTime
     );
-    // Kick off each player's first question
     this.players.forEach((p) => this.emitNextQuestion(p.id));
   }
 
-  // Generates or retrieves the next question for a given player
   emitNextQuestion(playerId) {
-    console.log("line no523 Game room " + playerId);
     const idx = this.playerProgress.get(playerId);
 
-    // Generate new question if needed
     if (this.questions.length <= idx) {
-      this.questionMeterController = null;
       const lowerRating = Math.min(...this.players.map((p) => p.rating));
-      let q;
-      try {
-        q = this.questionService.generateQuestion(
-          this.difficulty,
-          this.symbols,
-          lowerRating,
-          this.questionMeter
-        );
-      } catch {
-        // fallback
-        q = {
-          question: "What is 2 + 2?",
-          input1: "2",
-          input2: "2",
-          answer: "4",
-          symbol: "sum",
-          difficulty: this.difficulty,
-          finalLevel: 1,
-          qm: this.questionMeter,
-        };
-      }
+      const q = this.questionService.generateQuestion(
+        this.difficulty,
+        this.symbols,
+        lowerRating,
+        this.questionMeter
+      );
+
       this.questions.push(q);
-      // reset hasAnswered flag
-      this.players.forEach((p) => {
-        const progressIdx = this.playerProgress.get(p.id);
-        const key = `${progressIdx}`;
-        this.playerAnswers.set(key, new Map());
-      });
+      this.playerAnswers.set(`${idx}`, new Map());
     }
 
-    // Send to the specific player
-    const socketId = this.players.find((p) => p.id === playerId).socketId;
-    console.log("line no.561" + socketId);
-    console.log("newQuestion" + this.questions[idx]);
-    console.log(this.io);
-    // this.startQuestionTimer();
-    this.io &&
-      this.io.to(socketId).emit("next-question", {
-        // data : "dataaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-        question: this.questions[idx],
-        gameState: this.getGameState(),
-        questionMeter: this.questionMeter,
-      });
+    const player = this.players.find((p) => p.id === playerId);
 
-    // Advance their index
+    this.io.to(player.socketId).emit("next-question", {
+      question: this.questions[idx],
+      gameState: this.getGameState(),
+      questionMeter: this.questionMeter,
+    });
+
     this.playerProgress.set(playerId, idx + 1);
   }
 
-  startQuestionTimer() {
-    if (this.questionTimer) clearTimeout(this.questionTimer);
-    this.questionTimer = setTimeout(
-      () => this.handleQuestionTimeout(),
-      this.gameSettings.timePerQuestion
-    );
-  }
-
-  handleQuestionTimeout() {
-    // Auto-submit incorrect for those who haven't answered
-    this.players.forEach((player) => {
-      const idx = this.playerProgress.get(player.id) - 1;
-      const answersMap = this.playerAnswers.get(`${idx}`) || new Map();
-      if (!answersMap.has(player.id)) {
-        this.submitAnswer(player.id, null, this.gameSettings.timePerQuestion);
-      }
-    });
-    // Optionally emit a summary
-    const summary = this.completeQuestion();
-    this.players.forEach((p) =>
-      this.io.to(p.socketId).emit("question-completed", summary)
-    );
-
-    // Continue each player to next question
-    this.players.forEach((p) => this.emitNextQuestion(p.id));
-  }
-
   submitAnswer(playerId, answer, timeSpent) {
-    console.log("at line no. 601, inside submit answer");
-    console.log("gamestate:", this.gameState );
+    if (this.gameState !== "active") return;
 
-    if (this.gameState !== "active") throw new Error("Game not active");
-    console.log("at line no. 602, inside submit answer");
     const idx = this.playerProgress.get(playerId) - 1;
-    console.log("at line no. 603, inside submit answer");
     const q = this.questions[idx];
-    console.log("question after submitting the answer : ", q);
-    if (!q) throw new Error("No question found");
+    if (!q) return;
 
-    const key = `${idx}`;
-    const map = this.playerAnswers.get(key);
-    if (map.has(playerId)) throw new Error("Already answered");
+    const answers = this.playerAnswers.get(`${idx}`);
+    if (answers.has(playerId)) return;
 
     const isCorrect = this.questionService.checkAnswer(q, answer);
-    map.set(playerId, { answer, isCorrect, timeSpent, timestamp: Date.now() });
+    answers.set(playerId, { answer, isCorrect, timeSpent });
 
-    // Update score & stats
     const ps = this.playerScores.get(playerId);
     ps.questionsAnswered++;
     ps.totalTime += timeSpent;
+
     if (isCorrect) {
+      ps.correctAnswers++;
       ps.streak++;
       ps.maxStreak = Math.max(ps.maxStreak, ps.streak);
-      ps.correctAnswers++;
-      ps.score = this.questionService.calculateScore(ps.score, true, ps.streak);
+      ps.score += 10;
     } else {
       ps.streak = 0;
     }
-    // averageResponseTime if needed
-
-    // QM control by first answer
-    if (map.size === 1) {
-      this.questionMeterController = playerId;
-      const change = this.questionService.calculateQMChange(
-        isCorrect,
-        this.players.find((p) => p.id === playerId).rating,
-        q.finalLevel
-      );
-      this.questionMeter = Math.max(0, this.questionMeter + change);
-    }
-
-    console.log("at line 640, at the end of submit answer");
-
-    return {
-      isCorrect,
-      isFirstToAnswer: map.size === 1,
-      questionMeter: this.questionMeter,
-      questionMeterController: this.questionMeterController,
-    };
-  }
-
-  getPlayers() {
-    console.log("in the get player function ");
-    return this.players;
-  }
-  completeQuestion() {
-    if (this.questionTimer) clearTimeout(this.questionTimer);
-    const idx = this.playerProgress.get(this.players[0].id) - 1;
-    const q = this.questions[idx];
-    const answers = Object.fromEntries(this.playerAnswers.get(`${idx}`));
-    return {
-      questionIndex: idx,
-      question: q,
-      answers,
-      questionMeter: this.questionMeter,
-      questionMeterController: this.questionMeterController,
-    };
   }
 
   async endGame() {
     this.gameState = "completed";
     clearTimeout(this.gameTimer);
     clearTimeout(this.questionTimer);
-    // compute final results, ratings, etc.
-    const gameResults = await this.calculateGameResults();
 
-    // Save game data to database
-    try {
-      await this.saveGameToDatabase(gameResults);
-    } catch (error) {
-      console.error("Failed to save game to database:", error);
-      // You might want to emit an error event to clients here
-    }
+    const gameResults = await this.calculateGameResults();
+    await this.saveGameToDatabase(gameResults);
 
     return gameResults;
   }
 
   async calculateGameResults() {
-    const playerResults = this.players.map((player) => {
-      const score = this.playerScores.get(player.id);
+    const results = this.players.map((player) => {
+      const s = this.playerScores.get(player.id);
       return {
         playerId: player.id,
-        username: player.username,
         currentRating: player.rating,
-        finalScore: score.score,
-        correctAnswers: score.correctAnswers,
-        totalTime: score.totalTime,
-        maxStreak: score.maxStreak,
-        questionsAnswered: score.questionsAnswered,
+        finalScore: s.score,
+        totalTime: s.totalTime,
       };
     });
 
-    const winner = playerResults.reduce((best, current) => {
-      if (current.finalScore > best.finalScore) return current;
-      if (
-        current.finalScore === best.finalScore &&
-        current.totalTime < best.totalTime
-      )
-        return current;
-      return best;
-    });
-
-    // Calculate rating changes using ELO-like system
-    const ratingChanges = await this.calculateRatingChanges(
-      playerResults,
-      winner
+    const winner = results.reduce((a, b) =>
+      b.finalScore > a.finalScore ||
+      (b.finalScore === a.finalScore && b.totalTime < a.totalTime)
+        ? b
+        : a
     );
+
+    const ratingChanges = await this.calculateRatingChanges(results, winner);
+
     return {
       winner,
-      ratingChanges,
+      players: results.map((r, i) => ({
+        ...r,
+        won: r.playerId === winner.playerId,
+        newRating: r.currentRating + ratingChanges[i],
+      })),
       gameStats: {
         duration: Date.now() - this.createdAt,
-        totalQuestions: this.gameSettings.questionsPerGame,
-        questionsAnswered: this.currentQuestionIndex + 1,
-        finalQuestionMeter: this.questionMeter,
       },
-      players: playerResults.map((result, index) => ({
-        ...result,
-        won: result.playerId === winner.playerId,
-        newRating: result.currentRating + ratingChanges[index],
-      })),
     };
   }
 
   async saveGameToDatabase(gameResults) {
-    try {
-      const [player1, player2] = gameResults.players;
+    const [p1, p2] = gameResults.players;
 
-      const gameData = {
-        player1Username: player1.username,
-        player2Username: player2.username,
-        player1Score: player1.finalScore,
-        player2Score: player2.finalScore,
-        gameDuration: gameResults.gameStats.duration,
-      };
-
-      await savePVPGameToDatabase(gameData);
-      console.log("Game successfully saved to database");
-    } catch (error) {
-      console.error("Error saving game to database:", error);
-      throw error;
-    }
+    await savePVPGameToDatabase({
+      player1Id: p1.playerId,
+      player2Id: p2.playerId,
+      player1Score: p1.finalScore,
+      player2Score: p2.finalScore,
+      gameDuration: gameResults.gameStats.duration,
+    });
   }
 
-  handlePlayerDisconnect(playerId) {
-    // Mark game as completed due to disconnect
-    this.gameState = "completed";
-
-    if (this.gameTimer) {
-      clearTimeout(this.gameTimer);
-    }
-    if (this.questionTimer) {
-      clearTimeout(this.questionTimer);
-    }
-  }
-
-  /**
-   * Apply:
-   * 1. Victory: +5 to winner, -5 to loser
-   * 2. Superiority: +1 if the lower-rated player wins or draws, –1 to the opponent
-   * 3. Point-Difference: |scoreA–scoreB|/4 rounded up (max 4): + for winner, – for loser
-   */
   async calculateRatingChanges(playerResults, winner) {
     const changes = [];
 
-    // Identify lower- and higher-rated players
-    const [p1, p2] = playerResults;
-    const lowPlayer = p1.currentRating <= p2.currentRating ? p1 : p2;
-    const highPlayer = p1.currentRating > p2.currentRating ? p1 : p2;
-
-    playerResults.forEach(async (p) => {
-      // 1) Victory bonus
+    for (const p of playerResults) {
       let delta = p.playerId === winner.playerId ? +5 : -5;
 
-      // 2) Superiority bonus
-      const opp = playerResults.find((o) => o.playerId !== p.playerId);
-      if (p.playerId === lowPlayer.playerId && p.finalScore >= opp.finalScore) {
-        delta += 1;
-        // Penalize opponent for superiority
-        if (opp.playerId === highPlayer.playerId) {
-          // we’ll subtract 1 from the opponent below when we handle them
-        }
-      } else if (
-        p.playerId === highPlayer.playerId &&
-        lowPlayer.finalScore >= highPlayer.finalScore
-      ) {
-        // high-rated player loses superiority
-        delta -= 1;
-      }
-
-      // 3) Point-difference bonus (diff/4 rounded up, capped to 4)
-      const diff = Math.abs(p.finalScore - opp.finalScore);
-      const pd = Math.min(4, Math.ceil(diff / 4));
-      delta += p.playerId === winner.playerId ? +pd : -pd;
-
-      // await updatePlayerRatingInDatabase(p, delta, p.diff);
-      try {
-        // Update player rating in database
-        await updatePlayerRatingInDatabase(p.username, delta, this.difficulty);
-        console.log(`Updated rating for ${p.username}: ${delta}`);
-      } catch (error) {
-        console.error(`Failed to update rating for ${p.username}:`, error);
-      }
+      await updatePlayerRatingInDatabase(p.playerId, delta, this.difficulty);
 
       changes.push(delta);
-    });
+    }
 
     return changes;
   }
@@ -881,22 +657,16 @@ class GameRoom {
     return {
       gameId: this.id,
       state: this.gameState,
-      totalQuestions: this.gameSettings.questionsPerGame,
       playerProgress: Object.fromEntries(this.playerProgress),
       playerScores: Object.fromEntries(this.playerScores),
       questionMeter: this.questionMeter,
-      questionMeterController: this.questionMeterController,
       timeRemaining: Math.max(
         0,
         this.gameSettings.totalGameTime - (Date.now() - this.createdAt)
       ),
     };
   }
-
-  // Allow setting io instance for emissions
-  bindIO(io) {
-    this.io = io;
-  }
 }
 
 module.exports = { GameRoom };
+

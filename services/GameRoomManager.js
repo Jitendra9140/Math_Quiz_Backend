@@ -3,22 +3,24 @@ const { GameRoom } = require('./GameRoom.js');
 class GameRoomManager {
   constructor(questionService, io) {
     this.questionService = questionService;
-    this.diff = 'medium';
+    this.diff = "medium";
     this.gameRooms = new Map(); // roomId -> GameRoom
     this.playerToRoom = new Map(); // playerId -> roomId
     this.io = io;
   }
 
   createGameRoom(players) {
+    players.forEach((p) => {
+      if (this.playerToRoom.has(p.id)) {
+        throw new Error(`Player already in a game: ${p.id}`);
+      }
+    });
+
     const gameRoom = new GameRoom(players, this.questionService);
     gameRoom.bindIO(this.io);
-    
+
     this.gameRooms.set(gameRoom.id, gameRoom);
-    
-    // Map players to room
-    players.forEach(player => {
-      this.playerToRoom.set(player.id, gameRoom.id);
-    });
+    players.forEach((p) => this.playerToRoom.set(p.id, gameRoom.id));
 
     return gameRoom;
   }
@@ -36,10 +38,10 @@ class GameRoomManager {
     const gameRoom = this.gameRooms.get(roomId);
     if (gameRoom) {
       // Remove player mappings
-      gameRoom.getPlayers().forEach(player => {
+      gameRoom.getPlayers().forEach((player) => {
         this.playerToRoom.delete(player.id);
       });
-      
+
       this.gameRooms.delete(roomId);
     }
   }

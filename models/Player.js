@@ -67,7 +67,7 @@ const playerSchema = new mongoose.Schema(
         medium: { type: Number, default: 1000 },
         hard: { type: Number, default: 1000 },
       },
-    },
+    }, 
 
     fcmToken: {
       type: String,

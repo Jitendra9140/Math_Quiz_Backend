@@ -1,17 +1,35 @@
-const { v4: uuidv4 } = require("uuid");
 const Player = require("../models/Player");
 
 class PlayerManager {
   constructor() {
-    this.players = new Map(); // socketId -> Player
-    this.playersByRating = new Map(); // rating range -> Set of players
-    this.playersById = new Map();
+    this.players = new Map(); // socketId -> player
+    this.playersByRating = new Map(); // rating range -> Set
+    this.playersById = new Map(); // playerId -> player
   }
 
   addPlayer(socketId, playerData) {
-      console.log('socket id and player data in playerManager', socketId, playerData )
+    const existingPlayer = this.playersById.get(playerData.id);
+
+    // 🔁 PLAYER RECONNECTED
+    if (existingPlayer) {
+      console.log("♻️ Player reconnected:", playerData.id);
+
+      // remove old socket mapping
+      this.players.delete(existingPlayer.socketId);
+
+      // update socket id
+      existingPlayer.socketId = socketId;
+      existingPlayer.joinedAt = Date.now();
+
+      // re-map
+      this.players.set(socketId, existingPlayer);
+
+      return existingPlayer;
+    }
+
+    // 🆕 NEW PLAYER
     const player = {
-      id: uuidv4(),
+      id: playerData.id, // DB / JWT ID
       socketId,
       username: playerData.username,
       rating: playerData.rating || 1200,
@@ -22,41 +40,48 @@ class PlayerManager {
       isInGame: false,
       diff: playerData.diff || "medium",
     };
-    
+
     this.players.set(socketId, player);
     this.playersById.set(player.id, player);
-
     this.addToRatingGroup(player);
 
-    console.log("player", player)
-
+    console.log("✅ Player registered:", player.id);
     return player;
   }
 
+  removePlayer(socketId) {
+    const player = this.players.get(socketId);
+    if (!player) return;
+
+    this.players.delete(socketId);
+
+    // ❗ DO NOT delete playersById immediately
+    // Let reconnect happen
+    setTimeout(() => {
+      if (player.socketId === socketId) {
+        this.playersById.delete(player.id);
+        this.removeFromRatingGroup(player);
+        console.log("❌ Player removed:", player.id);
+      }
+    }, 5000); // grace period
+  }
+
   getPlayer(socketId) {
-    console.log(this.players);
-
-    // Convert Map values to array
-    const player = [...this.players.values()].find(
-      (p) => p.socketId === socketId
-    );
-
-    console.log("Found player:", player);
-    return player;
+    return this.players.get(socketId);
   }
 
   getPlayerById(playerId) {
     return this.playersById.get(playerId);
   }
 
-  removePlayer(socketId) {
-    const player = this.players.get(socketId);
-    if (player) {
-      this.removeFromRatingGroup(player);
-      this.players.delete(socketId);
-      this.playersById.delete(player.id);
-    }
-  }
+  // removePlayer(socketId) {
+  //   const player = this.players.get(socketId);
+  //   if (player) {
+  //     this.removeFromRatingGroup(player);
+  //     this.players.delete(socketId);
+  //     this.playersById.delete(player.id);
+  //   }
+  // }
 
   addToRatingGroup(player) {
     const ratingRange = this.getRatingRange(player.rating);
@@ -78,20 +103,22 @@ class PlayerManager {
   }
 
   getRatingRange(rating) {
-    // Group players in 200-point rating ranges
     return Math.floor(rating / 200) * 200;
   }
 
-  findPlayersInRatingRange(targetRating, maxDifference = 200, excludePlayerId = null) {
-  const players = [];
-  const minRating = targetRating - maxDifference;
-  const maxRating = targetRating + maxDifference;
+  findPlayersInRatingRange(
+    targetRating,
+    maxDifference = 200,
+    excludePlayerId = null
+  ) {
+    const players = [];
+    const minRating = targetRating - maxDifference;
+    const maxRating = targetRating + maxDifference;
 
-  for (const [ratingRange, playerSet] of this.playersByRating) {
-    if (ratingRange >= minRating && ratingRange <= maxRating) {
+    for (const [, playerSet] of this.playersByRating) {
       for (const player of playerSet) {
         if (
-          player.id !== excludePlayerId &&          // 🧩 Exclude self
+          player.id !== excludePlayerId &&
           !player.isInGame &&
           player.rating >= minRating &&
           player.rating <= maxRating
@@ -100,56 +127,7 @@ class PlayerManager {
         }
       }
     }
-  }
-
-  return players;
-}
-
-
-  updatePlayerRatings(gameResults) {
-    gameResults.forEach((result) => {
-      const player = Array.from(this.players.values()).find(
-        (p) => p.id === result.playerId
-      );
-
-      if (player) {
-        // Remove from old rating group
-        this.removeFromRatingGroup(player);
-
-        // Update stats
-        player.rating = result.newRating;
-        player.gamesPlayed++;
-        if (result.won) {
-          player.wins++;
-        } else {
-          player.losses++;
-        }
-
-        // Add to new rating group
-        this.addToRatingGroup(player);
-      }
-    });
-  }
-
-  getOnlinePlayersCount() {
-    return this.players.size;
-  }
-
-  getLeaderboard(limit = 10) {
-    return Array.from(this.players.values())
-      .sort((a, b) => b.rating - a.rating)
-      .slice(0, limit)
-      .map((player) => ({
-        username: player.username,
-        rating: player.rating,
-        gamesPlayed: player.gamesPlayed,
-        wins: player.wins,
-        losses: player.losses,
-        winRate:
-          player.gamesPlayed > 0
-            ? ((player.wins / player.gamesPlayed) * 100).toFixed(1)
-            : 0,
-      }));
+    return players;
   }
 }
 
