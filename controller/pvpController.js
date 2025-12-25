@@ -265,7 +265,7 @@ module.exports = function registerSocketHandlers(io) {
         if (!playerData.userId) {
           throw new Error("userId (MongoDB ID) is required");
         }
-
+        
         const player = playerManager.addPlayer(socket.id, {
           id: playerData.userId, // ✅ Use MongoDB ID as primary ID
           username: playerData.username,

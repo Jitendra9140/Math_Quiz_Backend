@@ -12,7 +12,7 @@ router.post('/respond', auth, matchController.respondMatchRequest);
 router.get('/requests', auth, matchController.listRequests);
 
 // 3) Record and display game results (win/loss)
-router.post('/result', auth, matchController.recordResult);
+router.post('/result', matchController.recordResult);
 router.get('/game/:id', auth, matchController.getGameResult);
 router.get('/results', auth, matchController.listResults);
 
