@@ -516,3 +516,51 @@ exports.myFriendList = async (req, res) => {
     });
   }
 };
+
+
+exports.deleteFriendshipByUser = async (req, res) => {
+  const { _id } = req.user; // logged-in user
+  const { friendId } = req.body; // other user's id
+
+  if (!friendId) {
+    return res.status(400).json({
+      success: false,
+      message: "friendId is required",
+    });
+  }
+
+  try {
+    // Find friendship (accepted OR pending) involving logged-in user
+    const friendship = await Friend.findOne({
+      status: { $in: ["accepted", "pending"] },
+      $or: [
+        { requester: _id, recipient: friendId },
+        { requester: friendId, recipient: _id },
+      ],
+    });
+
+    if (!friendship) {
+      return res.status(404).json({
+        success: false,
+        message: "Friendship or request not found",
+      });
+    }
+
+    // Delete friendship / request
+    await friendship.deleteOne();
+
+    return res.status(200).json({
+      success: true,
+      message:
+        friendship.status === "accepted"
+          ? "Friend removed successfully"
+          : "Friend request cancelled successfully",
+    });
+  } catch (error) {
+    console.error("Error deleting friendship:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Server error",
+    });
+  }
+};

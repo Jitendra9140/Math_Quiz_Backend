@@ -275,43 +275,55 @@ exports.resendSignupOTP = async (req, res) => {
 // POST /api/auth/login
 exports.login = async (req, res) => {
   const { email, password } = req.body;
+
   try {
-
     if (!email || !password) {
-      return res
-        .status(400)
-        .json({ success: false, message: "Email and password are required." });
+      return res.status(400).json({
+        success: false,
+        message: "Email and password are required.",
+      });
     }
-    console.log("Login attempt with password:", password); // Debug log
 
-    // 1. Find player by email
+    // 1️⃣ Find user
     const player = await Player.findOne({ email });
     if (!player) {
-      return res.status(400).json({ message: "Invalid credentials" });
+      return res.status(400).json({
+        success: false,
+        message: "Invalid credentials",
+      });
     }
 
-    console.log("Stored hash in DB:", player.password); // Debug log
-
-    // 2. Compare password using the schema method
+    // 2️⃣ Password check
     const isMatch = await player.comparePassword(password);
-    console.log("Password match result:", isMatch); // Debug log
-
-    // Also try direct bcrypt comparison for debugging
-    const directMatch = await bcrypt.compare(password, player.password);
-    console.log("Direct bcrypt comparison:", directMatch); // Debug log
-
     if (!isMatch) {
-      console.log("password not matched");
-      return res.status(400).json({ message: "Invalid credentials" });
+      return res.status(400).json({
+        success: false,
+        message: "Invalid credentials",
+      });
     }
 
-    // 3. Issue JWT
+    // 🟢 MAKE USER ACTIVE ON SUCCESSFUL LOGIN
+    if (player.accountStatus?.state !== "active") {
+      player.accountStatus = {
+        ...player.accountStatus,
+        state: "active",
+        lastActiveAt: new Date(),
+      };
+      await player.save();
+    } else {
+      // update last active time
+      player.accountStatus.lastActiveAt = new Date();
+      await player.save();
+    }
+
+    // 3️⃣ Issue JWT
     const token = jwt.sign({ id: player._id }, process.env.JWT_SECRET, {
       expiresIn: "7d",
     });
 
-    // 4. Respond
+    // 4️⃣ Response (NO password, NO timestamps)
     res.json({
+      success: true,
       token,
       player: {
         id: player._id,
@@ -325,9 +337,13 @@ exports.login = async (req, res) => {
     });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ message: "Server error", error: err.message });
+    res.status(500).json({
+      success: false,
+      message: "Server error",
+    });
   }
 };
+
 
 
 exports.deleteUserByAdmin = async (req, res) => {
@@ -680,7 +696,7 @@ exports.allUserList = async (req, res) => {
 
   try {
     const users = await Player.find({ }) 
-      .select("username email gender country");
+      .select("username email gender country accountStatus");
 
     return res.status(200).json({
       success: true,

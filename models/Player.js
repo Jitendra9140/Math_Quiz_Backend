@@ -67,11 +67,31 @@ const playerSchema = new mongoose.Schema(
         medium: { type: Number, default: 1000 },
         hard: { type: Number, default: 1000 },
       },
-    }, 
+    },
 
     fcmToken: {
       type: String,
       required: false,
+    },
+
+    accountStatus: {
+      state: {
+        type: String,
+        enum: ["active", "inactive", "blocked"],
+        default: "active",
+      },
+      reason: {
+        type: String,
+        default: "Active User",
+      },
+      changedAt: {
+        type: Date,
+        default: Date.now,
+      },
+      lastActiveAt: {
+        type: Date,
+        default: Date.now,
+      },
     },
   },
   { timestamps: true }

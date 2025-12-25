@@ -11,6 +11,8 @@ const questionRoutes = require('./routes/question');
 const matchRoutes = require('./routes/match');
 const practiceMatchRoutes = require('./routes/practicematch');
 const friendRoutes = require('./routes/friend')
+const adminRoutes = require('./routes/admin')
+
 
 
 const app = express();
@@ -38,6 +40,7 @@ app.use('/api/question', questionRoutes);
 app.use('/api/practice', practiceMatchRoutes)
 app.use('/api/friend', friendRoutes)
 app.use('/api/match', matchRoutes);
+app.use('/api/admin', adminRoutes);
 require('./controller/pvpController')(io);
 
 app.get('/', (req, res) =>{
