@@ -453,3 +453,66 @@ exports.deleteAllFriendship = async (req, res) => {
     });
   }
 };
+
+
+exports.myFriendList = async (req, res) => {
+  const { _id } = req.user; // logged-in user
+
+  try {
+    // 1️⃣ Find accepted friendships
+    const friendships = await Friend.find({
+      status: "accepted",
+      $or: [{ requester: _id }, { recipient: _id }],
+    })
+      .populate({
+        path: "requester",
+        select:
+          "username email firstName lastName gender country profileImage pr",
+      })
+      .populate({
+        path: "recipient",
+        select:
+          "username email firstName lastName gender country profileImage pr",
+      })
+      .sort({ updatedAt: -1 });
+
+    // 2️⃣ Extract ONLY friend data (not logged-in user)
+    const friends = friendships.map((f) => {
+      const friend =
+        f.requester._id.toString() === _id.toString()
+          ? f.recipient
+          : f.requester;
+
+      // Convert PR object → array 
+      const prArray = Object.entries(friend.pr || {}).map(([mode, levels]) => ({
+        mode,
+        ...levels,
+      }));
+
+      return {
+        _id: friend._id,
+        username: friend.username,
+        email: friend.email,
+        firstName: friend.firstName,
+        lastName: friend.lastName,
+        gender: friend.gender,
+        country: friend.country,
+        profileImage: friend.profileImage,
+        pr: prArray,
+        friendshipStatus: "accepted",
+      };
+    });
+
+    return res.status(200).json({
+      success: true,
+      total: friends.length,
+      friends,
+    });
+  } catch (error) {
+    console.error("Error fetching friend list:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Server error",
+    });
+  }
+};

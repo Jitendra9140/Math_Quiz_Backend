@@ -745,3 +745,39 @@ exports.getUser = async (req, res) => {
     });
   }
 }
+
+exports.getUserById = async (req, res) => {
+  try {
+    const { userId } = req.body; // ID coming from req.body
+
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        message: "userId is required",
+      });
+    }
+
+    const user = await Player.findById(userId).select(
+      "-password -createdAt -updatedAt -__v"
+    );
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      user,
+    });
+  } catch (error) {
+    console.error("Error fetching user:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Server error",
+    });
+  }
+};
+

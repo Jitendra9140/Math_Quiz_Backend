@@ -11,7 +11,7 @@ const getS3KeyFromUrl = (url) => {
 exports.updateProfile = async (req, res) => {
   try {
     const { _id } = req.user;
-    const { dateOfBirth, gender,firstName,lastName } = req.body;
+    const { dateOfBirth, gender,firstName,lastName ,country } = req.body;
 
     const user = await Player.findById(_id);
     if (!user) {
@@ -55,6 +55,7 @@ exports.updateProfile = async (req, res) => {
         ...(gender && { gender }),
         ...(firstName && { firstName }),
         ...(lastName && { lastName }),
+        ...(country && { country }),
         profileImage,
       },
       { new: true, runValidators: true }

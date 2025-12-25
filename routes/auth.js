@@ -36,6 +36,7 @@ router.put(
 
 //Get information
 router.get('/getUser', auth ,authController.getUser);
+router.get('/getUserById', auth ,authController.getUserById);
 router.get('/allUser', authController.allUserList);
 
 
