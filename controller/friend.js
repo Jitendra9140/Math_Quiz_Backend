@@ -248,56 +248,71 @@ exports.searchUser = async (req, res) => {
   const { _id } = req.user;
   const { searchText } = req.body;
 
-  console.error("sertxt:", searchText);
   try {
-    //  Find all friend relationships where user is involved
-    const friendships = await Friend.find({
-      $or: [
-        { requester: _id, status: "accepted" },
-        { recipient: _id, status: "accepted" },
-      ],
-    });
-
-    // Collect friend IDs
-    const friendIds = friendships.map((f) =>
-      f.requester.toString() === _id.toString() ? f.recipient : f.requester
-    );
-
-    console.error("frndid:", friendIds);
-
-    //  Build query for users
+    // 1️⃣ Build base query (same as userList)
     const query = {
-      _id: { $nin: [...friendIds, _id] }, // exclude self & friends
+      _id: { $ne: _id }, // exclude self
     };
 
+    // 2️⃣ Apply search filter
     if (searchText && searchText.trim() !== "") {
-      query.username = { $regex: searchText, $options: "i" }; // case-insensitive match
+      query.username = { $regex: searchText, $options: "i" };
     }
 
-    //  Fetch users
+    // 3️⃣ Fetch users
     const users = await Player.find(query).select(
-      "username email gender country"
+      "username email firstName lastName gender country profileImage pr"
     );
 
-    console.error("users:", users);
+    // 4️⃣ Fetch friendships
+    const friendships = await Friend.find({
+      $or: [{ requester: _id }, { recipient: _id }],
+    });
 
-    if (!users || users.length === 0) {
-      return res.status(404).json({
-        success: false,
-        message: "No users found",
-      });
-    }
+    // 5️⃣ Build friendship map
+    const friendshipMap = {};
+    friendships.forEach((f) => {
+      const otherUserId =
+        f.requester.toString() === _id.toString()
+          ? f.recipient.toString()
+          : f.requester.toString();
+
+      friendshipMap[otherUserId] = f.status;
+    });
+
+    // 6️⃣ Format users (SAME AS userList)
+    const userList = users.map((user) => {
+      const u = user.toObject();
+
+      const prArray = Object.entries(u.pr || {}).map(([mode, levels]) => ({
+        mode,
+        ...levels,
+      }));
+
+      return {
+        _id: u._id,
+        username: u.username,
+        email: u.email,
+        firstName: u.firstName,
+        lastName: u.lastName,
+        gender: u.gender,
+        country: u.country,
+        profileImage: u.profileImage,
+        pr: prArray,
+        friendshipStatus: friendshipMap[u._id.toString()] || "none",
+      };
+    });
 
     return res.status(200).json({
       success: true,
-      users,
+      users: userList,
     });
   } catch (error) {
-    console.error("error:", error);
+    console.error("Error searching users:", error);
     return res.status(500).json({
       success: false,
-      message: error.message,
-    });
+      message: "Server error",
+});
   }
 };
 
