@@ -112,7 +112,7 @@ exports.verifySignupOTP = async (req, res) => {
     }
 
     // Configurable constants
-    const MAX_ATTEMPTS = 3; // number of allowed failed attempts
+    const MAX_ATTEMPTS = 4; // number of allowed failed attempts
     const LOCK_DURATION_MS = 60 * 60 * 1000; // 1 hour
 
     // Check if account is locked
@@ -475,7 +475,7 @@ exports.verifyForgotPasswordOtp = async (req, res) => {
       });
     }
 
-    const MAX_ATTEMPTS = 3;
+    const MAX_ATTEMPTS = 4;
     const LOCK_DURATION_MS = 60 * 60 * 1000; // 1 hour
 
     // Check if locked
