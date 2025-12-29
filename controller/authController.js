@@ -20,7 +20,6 @@ const getS3KeyFromUrl = (url) => {
 };
 
 // POST /api/auth/signup
-// POST /api/auth/signup
 exports.signup = async (req, res) => {
   const { username, email, password, country, dateOfBirth, gender } = req.body;
 

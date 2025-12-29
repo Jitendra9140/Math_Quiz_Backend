@@ -2,12 +2,16 @@ const nodemailer = require("nodemailer");
 
 // Create transporter
 const transporter = nodemailer.createTransport({
-  service: "gmail",
+  host: "smtp.gmail.com",
+  port: 587,
+  secure: false, // true only for 465
   auth: {
     user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS
+    pass: process.env.EMAIL_PASS, // Gmail App Password
   },
+  connectionTimeout: 10000, // 10s
 });
+
 
 // Verify transporter configuration
 transporter.verify((error, success) => {
@@ -18,15 +22,7 @@ transporter.verify((error, success) => {
   }
 });
 
-/**
- * Send email utility function
- * @param {Object} options - Email options
- * @param {string} options.to - Recipient email
- * @param {string} options.subject - Email subject
- * @param {string} options.text - Plain text content
- * @param {string} options.html - HTML content (optional)
- * @returns {Promise}
- */
+
 const sendEmail = async (options) => {
   try {
     const mailOptions = {
