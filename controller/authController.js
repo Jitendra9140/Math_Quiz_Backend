@@ -20,13 +20,15 @@ const getS3KeyFromUrl = (url) => {
 };
 
 // POST /api/auth/signup
+// POST /api/auth/signup
 exports.signup = async (req, res) => {
   const { username, email, password, country, dateOfBirth, gender } = req.body;
 
   try {
-    if (
-      !username ||!email ||!password) {
-      return res.status(400).json({ message: "Email,Username and Password is required." });
+    if (!username || !email || !password) {
+      return res.status(400).json({
+        message: "Email, Username and Password are required.",
+      });
     }
 
     if (password.length < 6) {
@@ -34,36 +36,58 @@ exports.signup = async (req, res) => {
         message: "Password must be at least 6 characters long",
       });
     }
-    // 1. Check for existing email or username
-    let existing = await Player.findOne({ email });
-    if (existing) {
+
+    // 1️⃣ Check DB for existing user
+    if (await Player.findOne({ email })) {
       return res.status(400).json({ message: "Email already in use" });
     }
-    existing = await Player.findOne({ username });
-    if (existing) {
+    if (await Player.findOne({ username })) {
       return res.status(400).json({ message: "Username already taken" });
     }
-    if (!password || password.length < 6) {
-      return res.status(400).json({
-        message:
-          "Password is required and it should be at least 6 characters long",
-      });
+
+    const key = email.trim();
+    const existingOtp = otpStore.get(key);
+
+    // 2️⃣ BLOCK if OTP already exists & not expired
+    if (existingOtp) {
+      // 🔒 If locked
+      if (existingOtp.lockedUntil && Date.now() < existingOtp.lockedUntil) {
+        const remainingMinutes = Math.ceil(
+          (existingOtp.lockedUntil - Date.now()) / 60000
+        );
+        return res.status(429).json({
+          success: false,
+          message: `Your account is locked. Try again after ${remainingMinutes} minute(s).`,
+        });
+      }
+
+      // ⏳ OTP still valid → do not resend
+      if (Date.now() < existingOtp.expiresAt) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "OTP already sent to this email. Please verify or wait before requesting again.",
+        });
+      }
+
+      // ❌ OTP expired → clean it
+      otpStore.delete(key);
     }
 
-
-    // 2. Generate and store OTP with attempt tracking
+    // 3️⃣ Create NEW OTP (only now)
     const otp = generateOTP();
-    const expiresAt = Date.now() + 5 * 60 * 1000; // 5 minutes
-    console.log(otp)
-    otpStore.set(email.trim(), {
+    const expiresAt = Date.now() + 5 * 60 * 1000;
+
+    otpStore.set(key, {
       otp,
       expiresAt,
       attempts: 0,
+      resendCount: 0,
       lockedUntil: null,
       userData: { username, email, password, country, dateOfBirth, gender },
     });
 
-    // 3. Send OTP via email
+    // 4️⃣ Send OTP email
     await sendEmail({
       to: email,
       subject: "OTP to verify your email - Clumpcoder",
@@ -71,25 +95,26 @@ exports.signup = async (req, res) => {
       html: `
         <div style="font-family: Arial, sans-serif; padding: 20px;">
           <h2>Email Verification</h2>
-          <p>Your OTP code is: <strong style="font-size: 24px; color: #4CAF50;">${otp}</strong></p>
+          <p>Your OTP code is:
+            <strong style="font-size: 24px; color: #4CAF50;">${otp}</strong>
+          </p>
           <p>This code is valid for 5 minutes.</p>
-          <p>If you didn't request this, please ignore this email.</p>
         </div>
       `,
     });
 
-    res.status(200).json({
-      message:
-        "OTP sent to your email. Please verify to complete registration.",
+    return res.status(200).json({
       success: true,
-      email: email,
-      otp:otp
+      message: "OTP sent to your email. Please verify to complete registration.",
+      email,
+      otp
     });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ message: "Server error", error: err.message });
+    return res.status(500).json({ message: "Server error", error: err.message });
   }
 };
+
 
 // POST /api/auth/verify-signup-otp
 exports.verifySignupOTP = async (req, res) => {
@@ -219,7 +244,8 @@ exports.resendSignupOTP = async (req, res) => {
   const { email } = req.body;
 
   try {
-    const record = otpStore.get(email?.trim());
+    const key = email?.trim();
+    const record = otpStore.get(key);
 
     if (!record) {
       return res.status(400).json({
@@ -228,26 +254,41 @@ exports.resendSignupOTP = async (req, res) => {
       });
     }
 
-    // Check if locked
+    const MAX_RESENDS = 3;
+    const LOCK_DURATION_MS = 60 * 60 * 1000; // 1 hour
+
+    // 🔒 Check if account is locked
     if (record.lockedUntil && Date.now() < record.lockedUntil) {
-      const remainingTime = Math.ceil(
+      const remainingMinutes = Math.ceil(
         (record.lockedUntil - Date.now()) / 60000
       );
       return res.status(429).json({
         success: false,
-        message: `Account is locked. Please try again after ${remainingTime} minute(s)`,
+        message: `Your account is locked. Try again after ${remainingMinutes} minute(s).`,
       });
     }
 
-    // Generate new OTP
+    // 🔒 Lock if resend limit exceeded
+    if (record.resendCount >= MAX_RESENDS) {
+      record.lockedUntil = Date.now() + LOCK_DURATION_MS;
+      otpStore.set(key, record);
+
+      return res.status(429).json({
+        success: false,
+        message: "Your account is locked due to too many OTP requests. Try again after 1 hour.",
+      });
+    }
+
+    // ✅ Generate new OTP
     const otp = generateOTP();
-    const expiresAt = Date.now() + 5 * 60 * 1000;
-    console.log(otp)
-
     record.otp = otp;
-    record.expiresAt = expiresAt;
-    record.attempts = 0; // Reset attempts on resend
+    record.expiresAt = Date.now() + 5 * 60 * 1000;
+    record.attempts = 0;
+    record.resendCount += 1; // 🔥 TRACK RESENDS
 
+    otpStore.set(key, record);
+
+    // ✅ SEND EMAIL (ONLY IF NOT LOCKED)
     await sendEmail({
       to: email,
       subject: "New OTP for Email Verification - Clumpcoder",
@@ -255,21 +296,24 @@ exports.resendSignupOTP = async (req, res) => {
       html: `
         <div style="font-family: Arial, sans-serif; padding: 20px;">
           <h2>Email Verification</h2>
-          <p>Your new OTP code is: <strong style="font-size: 24px; color: #4CAF50;">${otp}</strong></p>
+          <p>Your new OTP code is:
+            <strong style="font-size: 24px; color: #4CAF50;">${otp}</strong>
+          </p>
           <p>This code is valid for 5 minutes.</p>
         </div>
       `,
     });
 
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
       message: "New OTP sent to your email",
     });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ message: "Server error", error: err.message });
+    return res.status(500).json({ message: "Server error", error: err.message });
   }
 };
+
 
 
 // POST /api/auth/login
