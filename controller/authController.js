@@ -118,16 +118,19 @@ exports.signup = async (req, res) => {
 // POST /api/auth/verify-signup-otp
 exports.verifySignupOTP = async (req, res) => {
   const { email, otp } = req.body;
+
   if (!email || otp === undefined || otp === null) {
-    return res
-      .status(400)
-      .json({ success: false, message: "Email and OTP are required." });
+    return res.status(400).json({
+      success: false,
+      message: "Email and OTP are required.",
+    });
   }
 
   try {
-    const key = email.trim();
+    const key = email.trim().toLowerCase();
     const record = otpStore.get(key);
 
+    //  No OTP found
     if (!record) {
       return res.status(400).json({
         success: false,
@@ -135,24 +138,7 @@ exports.verifySignupOTP = async (req, res) => {
       });
     }
 
-    // Configurable constants
-    const MAX_ATTEMPTS = 4; // number of allowed failed attempts
-    const LOCK_DURATION_MS = 60 * 60 * 1000; // 1 hour
-
-    // Check if account is locked
-    if (record.lockedUntil && Date.now() < record.lockedUntil) {
-      const remainingMinutes = Math.ceil(
-        (record.lockedUntil - Date.now()) / 60000
-      );
-      return res.status(429).json({
-        success: false,
-        message: `You have exceeded the number of attempts. Please try again after ${remainingMinutes} minute${
-          remainingMinutes > 1 ? "s" : ""
-        }.`,
-      });
-    }
-
-    // Check if OTP expired
+    //  OTP expired
     if (Date.now() > record.expiresAt) {
       otpStore.delete(key);
       return res.status(400).json({
@@ -161,42 +147,21 @@ exports.verifySignupOTP = async (req, res) => {
       });
     }
 
-    // Normalize OTPs so type/whitespace won't cause false mismatches
+    // Normalize OTP
     const providedOtp = String(otp).trim();
     const expectedOtp = String(record.otp).trim();
 
-    console.log("providedOtp:", providedOtp, "expectedOtp:", expectedOtp);
-
-    // Check OTP
+    //  OTP mismatch
     if (providedOtp !== expectedOtp) {
-      record.attempts = (record.attempts || 0) + 1;
-
-      // Lock after MAX_ATTEMPTS failed attempts
-      if (record.attempts >= MAX_ATTEMPTS) {
-        record.lockedUntil = Date.now() + LOCK_DURATION_MS;
-        // persist update to store if needed (Map holds object reference, but re-set for safety)
-        otpStore.set(key, record);
-
-        return res.status(429).json({
-          success: false,
-          message: `You have exceeded the number of attempts. Please try again after ${Math.ceil(
-            LOCK_DURATION_MS / 60000
-          )} minute(s).`,
-        });
-      }
-
-      // persist update to store
-      otpStore.set(key, record);
-
-      const attemptsLeft = MAX_ATTEMPTS - record.attempts;
       return res.status(400).json({
         success: false,
-        message: `Incorrect OTP. Please try again. ${attemptsLeft} attempt(s) remaining.`,
+        message: "Invalid OTP.",
       });
     }
 
-    // OTP is correct - create the player account
+    // ✅ OTP is correct — create account
     const { userData } = record;
+
     const player = new Player({
       username: userData.username,
       email: userData.email,
@@ -208,10 +173,10 @@ exports.verifySignupOTP = async (req, res) => {
 
     await player.save();
 
-    // Clear OTP record
+    // Clear OTP after success
     otpStore.delete(key);
 
-    // Generate JWT token
+    // Generate JWT
     const token = jwt.sign({ id: player._id }, process.env.JWT_SECRET, {
       expiresIn: "7d",
     });
@@ -230,13 +195,16 @@ exports.verifySignupOTP = async (req, res) => {
         gender: player.gender,
       },
     });
-  }catch (err) {
-    console.error(err);
-    return res
-      .status(500)
-      .json({ message: "Server error", error: err.message });
+  } catch (err) {
+    console.error("Verify OTP Error:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Server error",
+      error: err.message,
+    });
   }
 };
+
 
 // POST /api/auth/resend-signup-otp
 exports.resendSignupOTP = async (req, res) => {
