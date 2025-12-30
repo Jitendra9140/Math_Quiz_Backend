@@ -159,7 +159,9 @@ class RedisMatchmakingService {
         return false; // No one in queue
       }
 
-      console.log(`🔎 Found ${playersInQueue.length} players in queue for ${player.username}`);
+      console.log(
+        `🔎 Found ${playersInQueue.length} players in queue for ${player.username}`
+      );
 
       // Find best opponent (closest rating)
       let bestOpponent = null;
@@ -260,6 +262,7 @@ class RedisMatchmakingService {
   /**
    * Create a match between two players
    */
+  
   async createMatch(player1, player2) {
     try {
       console.log(
@@ -268,32 +271,40 @@ class RedisMatchmakingService {
 
       // ✅ DEBUG: Check callbacks BEFORE creating game room
       console.log(`📋 Total callbacks in map: ${this.playerCallbacks.size}`);
-      console.log(`   Player1 (${player1.id}) callback exists: ${this.playerCallbacks.has(player1.id)}`);
-      console.log(`   Player2 (${player2.id}) callback exists: ${this.playerCallbacks.has(player2.id)}`);
+      console.log(
+        `   Player1 (${player1.id}) callback exists: ${this.playerCallbacks.has(
+          player1.id
+        )}`
+      );
+      console.log(
+        `   Player2 (${player2.id}) callback exists: ${this.playerCallbacks.has(
+          player2.id
+        )}`
+      );
 
-      // Mark both as in game
-      player1.isInGame = true;
-      player2.isInGame = true;
-
-      // Create game room
-      const gameRoom = this.gameRoomManager.createGameRoom([player1, player2]);
-
-      // Remove both from all queues
-      await this.removeFromQueue(player1);
-      await this.removeFromQueue(player2);
-
-      // Get callbacks
+      // ✅ Get callbacks FIRST (before any modifications)
       const callback1 = this.playerCallbacks.get(player1.id);
       const callback2 = this.playerCallbacks.get(player2.id);
 
       console.log(`📞 Callback1 type: ${typeof callback1}`);
       console.log(`📞 Callback2 type: ${typeof callback2}`);
 
-      // Clean up callbacks
+      // ✅ Create game room FIRST (before marking as in-game)
+      const gameRoom = this.gameRoomManager.createGameRoom([player1, player2]);
+
+      // ✅ Now mark both as in game (AFTER successful game room creation)
+      player1.isInGame = true;
+      player2.isInGame = true;
+
+      // ✅ Remove from Redis queues
+      await this.removeFromQueue(player1);
+      await this.removeFromQueue(player2);
+
+      // ✅ Clean up callbacks
       this.playerCallbacks.delete(player1.id);
       this.playerCallbacks.delete(player2.id);
 
-      // Notify both players
+      // ✅ Notify both players
       if (callback1) {
         console.log(`📤 Calling callback1 for ${player1.username}`);
         try {
@@ -305,7 +316,7 @@ class RedisMatchmakingService {
       } else {
         console.log(`❌ No callback1 for ${player1.username}`);
       }
-      
+
       if (callback2) {
         console.log(`📤 Calling callback2 for ${player2.username}`);
         try {
@@ -324,7 +335,6 @@ class RedisMatchmakingService {
       throw error;
     }
   }
-
   /**
    * Remove player from matchmaking queue
    */
