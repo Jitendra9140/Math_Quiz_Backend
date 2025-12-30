@@ -1,413 +1,3 @@
-// const { v4 : uuidv4 } = require('uuid');
-
-// class GameRoom {
-//   constructor(players, questionService) {
-//     this.id = uuidv4();
-//     this.players = players;
-//     this.questionService = questionService;
-//     this.createdAt = Date.now();
-//     this.gameState = 'waiting'; // waiting, active, completed
-//     this.currentQuestionIndex = 0;
-//     this.questions = []; // Shared questions for both players
-//     this.playerAnswers = new Map(); // questionIndex -> Map(playerId -> answer data)
-//     this.playerScores = new Map(); // playerId -> score data
-//     this.gameTimer = null;
-//     this.questionTimer = null;
-
-//     // Question Meter System
-//     this.questionMeter = 0; // Current QM value
-//     this.questionMeterController = null; // Player ID who controls QM (first to answer)
-//     this.difficulty = 'medium'; // Game difficulty
-//     this.symbols = ['sum', 'difference', 'product', 'quotient']; // Math symbols for questions
-
-//     this.gameSettings = {
-//       questionsPerGame: 10,
-//       timePerQuestion: 30000, // 30 seconds
-//       totalGameTime: 600000 // 10 minutes max
-//     };
-
-//     // Initialize player scores
-//     this.players.forEach(player => {
-//       this.playerScores.set(player.id, {
-//         score: 0,
-//         correctAnswers: 0,
-//         totalTime: 0,
-//         streak: 0,
-//         maxStreak: 0,
-//         questionsAnswered: 0
-//       });
-//     });
-
-//     // Set initial question meter based on lower player rating
-//     this.questionMeter = this.questionService.getInitialQuestionMeter(
-//       this.players[0].rating,
-//       this.players[1].rating
-//     );
-//   }
-
-//   startGame() {
-//     this.gameState = 'active';
-
-//     // Generate first question based on initial QM
-//     this.generateNextQuestion();
-
-//     this.startGameTimer();
-//     this.startQuestionTimer();
-//   }
-
-//   generateNextQuestion() {
-//     try {
-//       // Use the lower player rating for question generation
-//       const lowerRating = Math.min(this.players[0].rating, this.players[1].rating);
-
-//       const question = this.questionService.generateQuestion(
-//         this.difficulty,
-//         this.symbols,
-//         lowerRating,
-//         this.questionMeter
-//       );
-
-//       this.questions.push(question);
-//       console.log(`Generated question ${this.questions.length} with QM: ${this.questionMeter}, Level: ${question.finalLevel}`);
-//     } catch (error) {
-//       console.error("Error generating question:", error);
-//       // Fallback to a basic question structure
-//       this.questions.push({
-//         question: "What is 2 + 2?",
-//         input1: "2",
-//         input2: "2",
-//         answer: "4",
-//         symbol: "+",
-//         difficulty: this.difficulty,
-//         finalLevel: 1,
-//         qm: this.questionMeter
-//       });
-//     }
-//   }
-
-//   startGameTimer() {
-//     this.gameTimer = setTimeout(() => {
-//       this.endGame();
-//     }, this.gameSettings.totalGameTime);
-//   }
-
-//   startQuestionTimer() {
-//     this.questionTimer = setTimeout(() => {
-//       this.completeQuestion();
-//     }, this.gameSettings.timePerQuestion);
-//   }
-
-//   getCurrentQuestion() {
-//     return this.questions[this.currentQuestionIndex];
-//   }
-
-//   submitAnswer(playerId, answer, timeSpent) {
-//     if (this.gameState !== 'active') {
-//       throw new Error('Game is not active');
-//     }
-
-//     const currentQuestion = this.getCurrentQuestion();
-//     if (!currentQuestion) {
-//       throw new Error('No current question');
-//     }
-
-//     // Initialize answers map for current question if not exists
-//     if (!this.playerAnswers.has(this.currentQuestionIndex)) {
-//       this.playerAnswers.set(this.currentQuestionIndex, new Map());
-//     }
-
-//     const questionAnswers = this.playerAnswers.get(this.currentQuestionIndex);
-
-//     // Check if player already answered
-//     if (questionAnswers.has(playerId)) {
-//       throw new Error('Player already answered this question');
-//     }
-
-//     const isCorrect = this.questionService.checkAnswer(currentQuestion, answer);
-//     const answerData = {
-//       answer,
-//       isCorrect,
-//       timeSpent,
-//       submittedAt: Date.now()
-//     };
-
-//     questionAnswers.set(playerId, answerData);
-
-//     // Update player score and streak
-//     this.updatePlayerScore(playerId, answerData, currentQuestion);
-
-//     // Handle Question Meter control (first to answer controls QM)
-//     const isFirstToAnswer = questionAnswers.size === 1;
-//     if (isFirstToAnswer) {
-//       this.questionMeterController = playerId;
-
-//       // Update question meter based on this player's answer
-//       const player = this.players.find(p => p.id === playerId);
-//       const qmChange = this.questionService.calculateQMChange(
-//         isCorrect,
-//         player.rating,
-//         currentQuestion.finalLevel
-//       );
-
-//       this.questionMeter = Math.max(0, this.questionMeter + qmChange);
-
-//       console.log(`Player ${playerId} controls QM. Change: ${qmChange}, New QM: ${this.questionMeter}`);
-//     }
-
-//     return {
-//       isCorrect,
-//       timeSpent,
-//       currentScore: this.playerScores.get(playerId),
-//       isFirstToAnswer,
-//       questionMeter: this.questionMeter,
-//       questionMeterController: this.questionMeterController
-//     };
-//   }
-
-//   updatePlayerScore(playerId, answerData, question) {
-//     const playerScore = this.playerScores.get(playerId);
-
-//     playerScore.questionsAnswered++;
-
-//     if (answerData.isCorrect) {
-//       playerScore.streak++;
-//       playerScore.maxStreak = Math.max(playerScore.maxStreak, playerScore.streak);
-//       playerScore.correctAnswers++;
-
-//       // Calculate score using the question service method
-//       playerScore.score = this.questionService.calculateScore(
-//         playerScore.score,
-//         true,
-//         playerScore.streak
-//       );
-//     } else {
-//       playerScore.streak = 0;
-//     }
-
-//     playerScore.totalTime += answerData.timeSpent;
-//   }
-
-//   isQuestionComplete() {
-//     if (!this.playerAnswers.has(this.currentQuestionIndex)) {
-//       return false;
-//     }
-
-//     const questionAnswers = this.playerAnswers.get(this.currentQuestionIndex);
-//     return questionAnswers.size === this.players.length;
-//   }
-
-//   completeQuestion() {
-//     if (this.questionTimer) {
-//       clearTimeout(this.questionTimer);
-//       this.questionTimer = null;
-//     }
-
-//     const currentQuestion = this.getCurrentQuestion();
-//     const questionAnswers = this.playerAnswers.get(this.currentQuestionIndex) || new Map();
-
-//     // Handle players who didn't answer (timeout)
-//     this.players.forEach(player => {
-//       if (!questionAnswers.has(player.id)) {
-//         const timeoutAnswerData = {
-//           answer: null,
-//           isCorrect: false,
-//           timeSpent: this.gameSettings.timePerQuestion,
-//           submittedAt: Date.now()
-//         };
-
-//         questionAnswers.set(player.id, timeoutAnswerData);
-
-//         // Update score for timeout (breaks streak)
-//         const playerScore = this.playerScores.get(player.id);
-//         playerScore.streak = 0;
-//         playerScore.totalTime += this.gameSettings.timePerQuestion;
-//         playerScore.questionsAnswered++;
-
-//         // If this player was supposed to control QM but timed out
-//         if (questionAnswers.size === 1) { // First player timed out
-//           this.questionMeterController = player.id;
-//           // Decrease QM for timeout
-//           const qmChange = this.questionService.calculateQMChange(
-//             false,
-//             player.rating,
-//             currentQuestion.finalLevel
-//           );
-//           this.questionMeter = Math.max(0, this.questionMeter + qmChange);
-//         }
-//       }
-//     });
-
-//     return {
-//       questionIndex: this.currentQuestionIndex,
-//       question: currentQuestion,
-//       answers: Object.fromEntries(questionAnswers),
-//       correctAnswer: currentQuestion.answer,
-//       explanation: currentQuestion.explanation || `The correct answer is ${currentQuestion.answer}`,
-//       playerScores: Object.fromEntries(this.playerScores),
-//       questionMeter: this.questionMeter,
-//       questionMeterController: this.questionMeterController
-//     };
-//   }
-
-//   nextQuestion() {
-//     this.currentQuestionIndex++;
-//     if (this.hasMoreQuestions()) {
-//       // Generate next question based on updated QM
-//       this.generateNextQuestion();
-//       this.startQuestionTimer();
-
-//       // Reset QM controller for next question
-//       this.questionMeterController = null;
-//     }
-//   }
-
-//   hasMoreQuestions() {
-//     return this.currentQuestionIndex < this.gameSettings.questionsPerGame - 1;
-//   }
-
-//   endGame() {
-//     this.gameState = 'completed';
-
-//     if (this.gameTimer) {
-//       clearTimeout(this.gameTimer);
-//       this.gameTimer = null;
-//     }
-
-//     if (this.questionTimer) {
-//       clearTimeout(this.questionTimer);
-//       this.questionTimer = null;
-//     }
-
-//     // Calculate final results and rating changes
-//     const results = this.calculateGameResults();
-
-//     return {
-//       gameId: this.id,
-//       finalScores: Object.fromEntries(this.playerScores),
-//       winner: results.winner,
-//       ratingChanges: results.ratingChanges,
-//       gameStats: results.gameStats,
-//       players: results.players,
-//       finalQuestionMeter: this.questionMeter
-//     };
-//   }
-
-//   calculateGameResults() {
-//     const playerResults = this.players.map(player => {
-//       const score = this.playerScores.get(player.id);
-//       return {
-//         playerId: player.id,
-//         username: player.username,
-//         currentRating: player.rating,
-//         finalScore: score.score,
-//         correctAnswers: score.correctAnswers,
-//         totalTime: score.totalTime,
-//         maxStreak: score.maxStreak,
-//         questionsAnswered: score.questionsAnswered
-//       };
-//     });
-
-//     // Determine winner (highest score, then least time if tied)
-//     const winner = playerResults.reduce((best, current) => {
-//       if (current.finalScore > best.finalScore) return current;
-//       if (current.finalScore === best.finalScore && current.totalTime < best.totalTime) return current;
-//       return best;
-//     });
-
-//     // Calculate rating changes using ELO-like system
-//     const ratingChanges = this.calculateRatingChanges(playerResults, winner);
-
-//     return {
-//       winner,
-//       ratingChanges,
-//       gameStats: {
-//         duration: Date.now() - this.createdAt,
-//         totalQuestions: this.gameSettings.questionsPerGame,
-//         questionsAnswered: this.currentQuestionIndex + 1,
-//         finalQuestionMeter: this.questionMeter
-//       },
-//       players: playerResults.map((result, index) => ({
-//         ...result,
-//         won: result.playerId === winner.playerId,
-//         newRating: result.currentRating + ratingChanges[index]
-//       }))
-//     };
-//   }
-
-//   calculateRatingChanges(playerResults, winner) {
-//     const K = 32; // ELO K-factor
-//     const changes = [];
-
-//     for (let i = 0; i < playerResults.length; i++) {
-//       const player = playerResults[i];
-//       const opponent = playerResults[1 - i]; // Assumes 2 players
-
-//       const expectedScore = 1 / (1 + Math.pow(10, (opponent.currentRating - player.currentRating) / 400));
-//       const actualScore = player.playerId === winner.playerId ? 1 : 0;
-
-//       const ratingChange = Math.round(K * (actualScore - expectedScore));
-//       changes.push(ratingChange);
-//     }
-
-//     return changes;
-//   }
-
-//   handlePlayerDisconnect(playerId) {
-//     // Mark game as completed due to disconnect
-//     this.gameState = 'completed';
-
-//     if (this.gameTimer) {
-//       clearTimeout(this.gameTimer);
-//     }
-//     if (this.questionTimer) {
-//       clearTimeout(this.questionTimer);
-//     }
-//   }
-
-//   getPlayers() {
-//     return this.players;
-//   }
-
-//   getGameState() {
-//     return {
-//       gameId: this.id,
-//       state: this.gameState,
-//       currentQuestionIndex: this.currentQuestionIndex,
-//       totalQuestions: this.gameSettings.questionsPerGame,
-//       playerScores: Object.fromEntries(this.playerScores),
-//       timeRemaining: this.getTimeRemaining(),
-//       questionMeter: this.questionMeter,
-//       questionMeterController: this.questionMeterController,
-//       difficulty: this.difficulty
-//     };
-//   }
-
-//   getTimeRemaining() {
-//     if (this.gameState !== 'active') return 0;
-
-//     const elapsed = Date.now() - this.createdAt;
-//     return Math.max(0, this.gameSettings.totalGameTime - elapsed);
-//   }
-
-//   getPublicData() {
-//     return {
-//       id: this.id,
-//       players: this.players.map(p => ({
-//         id: p.id,
-//         username: p.username,
-//         rating: p.rating
-//       })),
-//       createdAt: this.createdAt,
-//       gameState: this.gameState,
-//       questionMeter: this.questionMeter,
-//       difficulty: this.difficulty
-//     };
-//   }
-// }
-
-// module.exports = {GameRoom}
-
-// services/GameRoom.js
 const Player = require("../models/Player");
 const PVPGame = require("../models/PVPGame");
 
@@ -432,18 +22,31 @@ async function updatePlayerRatingInDatabase(playerId, delta, diff) {
 
 async function savePVPGameToDatabase(gameData) {
   try {
-    const { player1Id, player2Id, player1Score, player2Score, gameDuration } =
-      gameData;
+    const {
+      player1Id,
+      player2Id,
+      player1Score,
+      player2Score,
+      gameDuration,
+      disconnectedPlayerId,
+    } = gameData;
 
     let result = "Draw";
     let winner = null;
 
-    if (player1Score > player2Score) {
-      result = "Player1Won";
-      winner = player1Id;
-    } else if (player2Score > player1Score) {
-      result = "Player2Won";
-      winner = player2Id;
+    // If someone disconnected, they automatically lose
+    if (disconnectedPlayerId) {
+      winner = disconnectedPlayerId === player1Id ? player2Id : player1Id;
+      result = disconnectedPlayerId === player1Id ? "Player2Won" : "Player1Won";
+    } else {
+      // Normal win condition
+      if (player1Score > player2Score) {
+        result = "Player1Won";
+        winner = player1Id;
+      } else if (player2Score > player1Score) {
+        result = "Player2Won";
+        winner = player2Id;
+      }
     }
 
     const pvpGame = new PVPGame({
@@ -471,7 +74,6 @@ async function savePVPGameToDatabase(gameData) {
 
 class GameRoom {
   constructor(players, questionService) {
-    // ✅ NO UUID — playerId based room id
     this.id = `${players[0].id}_${players[1].id}_${Date.now()}`;
 
     this.players = players;
@@ -503,6 +105,10 @@ class GameRoom {
       timePerQuestion: 30000,
       totalGameTime: 60000,
     };
+
+    // Track disconnections
+    this.disconnectedPlayerId = null;
+    this.disconnectedAt = null;
 
     players.forEach((player) => {
       this.playerScores.set(player.id, {
@@ -583,7 +189,148 @@ class GameRoom {
     }
   }
 
+  /**
+   * NEW: Handle player disconnection
+   * - Mark disconnected player
+   * - End game immediately
+   * - Award win to remaining player
+   */
+  async handlePlayerDisconnect(playerId) {
+    console.log(`🔌 Player ${playerId} disconnected from game ${this.id}`);
+
+    // Only handle disconnect if game is active
+    if (this.gameState !== "active" && this.gameState !== "waiting") {
+      console.log(`Game already ${this.gameState}, ignoring disconnect`);
+      return null;
+    }
+
+    // Mark the disconnection
+    this.disconnectedPlayerId = playerId;
+    this.disconnectedAt = Date.now();
+    this.gameState = "completed";
+
+    // Clear all timers
+    if (this.gameTimer) {
+      clearTimeout(this.gameTimer);
+      this.gameTimer = null;
+    }
+    if (this.questionTimer) {
+      clearTimeout(this.questionTimer);
+      this.questionTimer = null;
+    }
+
+    // Get the remaining player (winner)
+    const remainingPlayer = this.players.find((p) => p.id !== playerId);
+    const disconnectedPlayer = this.players.find((p) => p.id === playerId);
+
+    if (!remainingPlayer) {
+      console.error("No remaining player found!");
+      return null;
+    }
+
+    // Calculate results with disconnect penalty
+    const gameResults = await this.calculateDisconnectResults(
+      remainingPlayer,
+      disconnectedPlayer
+    );
+
+    // Save to database
+    await this.saveGameToDatabase(gameResults);
+
+    // Emit to remaining player
+    if (this.io && remainingPlayer.socketId) {
+      this.io.to(remainingPlayer.socketId).emit("opponent-disconnected", {
+        message: "Your opponent has disconnected. You win!",
+        gameResults: gameResults,
+        finalQuestionMeter: this.questionMeter,
+        yourPlayerId: remainingPlayer.id,
+        disconnectedPlayerId: playerId,
+      });
+
+      console.log(
+        `📤 Sent opponent-disconnected to ${remainingPlayer.username}`
+      );
+    }
+
+    return gameResults;
+  }
+
+  /**
+   * Calculate results when a player disconnects
+   */
+  async calculateDisconnectResults(winner, disconnectedPlayer) {
+    const winnerScore = this.playerScores.get(winner.id);
+    const disconnectedScore = this.playerScores.get(disconnectedPlayer.id);
+
+    const results = [
+      {
+        playerId: winner.id,
+        username: winner.username,
+        currentRating: winner.rating,
+        finalScore: winnerScore.score,
+        totalTime: winnerScore.totalTime,
+        correctAnswers: winnerScore.correctAnswers,
+        disconnected: false,
+      },
+      {
+        playerId: disconnectedPlayer.id,
+        username: disconnectedPlayer.username,
+        currentRating: disconnectedPlayer.rating,
+        finalScore: disconnectedScore.score,
+        totalTime: disconnectedScore.totalTime,
+        correctAnswers: disconnectedScore.correctAnswers,
+        disconnected: true,
+      },
+    ];
+
+    // Calculate rating changes (winner gets +5, disconnected gets -10)
+    const ratingChanges = await this.calculateDisconnectRatingChanges(
+      results,
+      winner.id
+    );
+
+    return {
+      winner: results[0],
+      disconnectedPlayer: results[1],
+      players: results.map((r, i) => ({
+        ...r,
+        won: r.playerId === winner.id,
+        newRating: r.currentRating + ratingChanges[i],
+        ratingChange: ratingChanges[i],
+      })),
+      gameStats: {
+        duration: this.disconnectedAt - this.createdAt,
+        endReason: "disconnect",
+        disconnectedAt: this.disconnectedAt,
+      },
+    };
+  }
+
+  /**
+   * Calculate rating changes for disconnect scenario
+   */
+  async calculateDisconnectRatingChanges(playerResults, winnerId) {
+    const changes = [];
+
+    for (const p of playerResults) {
+      // Winner gets +5, disconnected player gets -10 (penalty)
+      let delta = p.playerId === winnerId ? +5 : -10;
+
+      await updatePlayerRatingInDatabase(p.playerId, delta, this.difficulty);
+
+      changes.push(delta);
+    }
+
+    return changes;
+  }
+
   async endGame() {
+    // Don't end if already ended by disconnect
+    if (this.gameState === "completed") {
+      console.log("Game already completed, skipping endGame");
+      return null;
+    }
+
     this.gameState = "completed";
     clearTimeout(this.gameTimer);
     clearTimeout(this.questionTimer);
@@ -599,9 +346,12 @@ class GameRoom {
       const s = this.playerScores.get(player.id);
       return {
         playerId: player.id,
+        username: player.username,
         currentRating: player.rating,
         finalScore: s.score,
         totalTime: s.totalTime,
+        correctAnswers: s.correctAnswers,
+        disconnected: false,
       };
     });
 
@@ -620,9 +370,11 @@ class GameRoom {
         ...r,
         won: r.playerId === winner.playerId,
         newRating: r.currentRating + ratingChanges[i],
+        ratingChange: ratingChanges[i],
       })),
       gameStats: {
         duration: Date.now() - this.createdAt,
+        endReason: "normal",
       },
     };
   }
@@ -636,6 +388,7 @@ class GameRoom {
       player1Score: p1.finalScore,
       player2Score: p2.finalScore,
       gameDuration: gameResults.gameStats.duration,
+      disconnectedPlayerId: this.disconnectedPlayerId, // NEW: Track who disconnected
     });
   }
 
@@ -664,6 +417,7 @@ class GameRoom {
         0,
         this.gameSettings.totalGameTime - (Date.now() - this.createdAt)
       ),
+      disconnectedPlayerId: this.disconnectedPlayerId,
     };
   }
 
@@ -696,4 +450,3 @@ class GameRoom {
 }
 
 module.exports = { GameRoom };
-

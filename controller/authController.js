@@ -230,7 +230,7 @@ exports.verifySignupOTP = async (req, res) => {
         gender: player.gender,
       },
     });
-  } catch (err) {
+  }catch (err) {
     console.error(err);
     return res
       .status(500)

@@ -4,7 +4,6 @@ const mongoose = require('mongoose');
 const cors = require('cors');
 const path = require("path");
 require('dotenv').config();
-
 // import routes and controllers
 const authRoutes = require('./routes/auth');
 const questionRoutes = require('./routes/question');
@@ -17,8 +16,8 @@ const adminRoutes = require('./routes/admin')
 
 const app = express();
 const server = http.createServer(app);
-
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));
+
 
 // initialize Socket.IO
 const { Server } = require('socket.io');

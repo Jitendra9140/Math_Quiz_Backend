@@ -1,8 +1,11 @@
+// services/QuestionService.js
 const { getQuestions } = require("../loadQuestion");
 
 class QuestionService {
   constructor() {
-    this.questionCache = new Map(); // Cache for loaded questions
+    this.questionCache = new Map(); // Cache: difficulty_level -> questions[]
+    this.symbolCache = new Map(); // Cache: difficulty_level_symbols -> questions[]
+    this.totalQuestionsLoaded = 0;
     this.preloadQuestions();
   }
 
@@ -10,8 +13,9 @@ class QuestionService {
     console.log("[Startup] Preloading questions from Excel...");
     try {
       const data = getQuestions();
-      // console.log(`[Startup] Preloaded ${data.length} questions`);
+      this.totalQuestionsLoaded = data.length;
 
+      // Build primary cache (difficulty + level)
       const cache = new Map();
       data.forEach((question) => {
         const key = `${question.difficulty}_${question.finalLevel}`;
@@ -23,20 +27,25 @@ class QuestionService {
 
       this.questionCache = cache;
 
+      // Build statistics
       const stats = {
         byDifficulty: {},
         byFinalLevel: {},
+        total: data.length,
       };
 
       data.forEach((q) => {
-        stats.byDifficulty[q.difficulty] = (stats.byDifficulty[q.difficulty] || 0) + 1;
-        stats.byFinalLevel[q.finalLevel] = (stats.byFinalLevel[q.finalLevel] || 0) + 1;
+        stats.byDifficulty[q.difficulty] =
+          (stats.byDifficulty[q.difficulty] || 0) + 1;
+        stats.byFinalLevel[q.finalLevel] =
+          (stats.byFinalLevel[q.finalLevel] || 0) + 1;
       });
 
-      // console.log("[Startup] Questions by difficulty:", stats.byDifficulty);
-      // console.log("[Startup] Questions by final level:", stats.byFinalLevel);
+      console.log(`[Startup] ✅ Loaded ${stats.total} questions`);
+      console.log("[Startup] By difficulty:", stats.byDifficulty);
+      console.log("[Startup] By level:", stats.byFinalLevel);
     } catch (error) {
-      console.error("[Startup] Error preloading questions:", error);
+      console.error("[Startup] ❌ Error preloading questions:", error);
     }
   }
 
@@ -78,12 +87,10 @@ class QuestionService {
   determineFinalQuestionLevel(playerRating, difficulty, qm = null) {
     if (qm !== null && qm !== undefined && qm >= 0) {
       const qmLevel = this.getQuestionLevelFromQM(qm);
-      console.log(`Using QM-based level: QM=${qm} -> Level=${qmLevel}`);
       return qmLevel;
     }
 
     const ratingLevel = this.determineQuestionLevel(playerRating, difficulty);
-    console.log(`Using rating-based level: Rating=${playerRating}, Difficulty=${difficulty} -> Level=${ratingLevel}`);
     return ratingLevel;
   }
 
@@ -99,39 +106,75 @@ class QuestionService {
 
   generateQuestion(difficulty, symbols, playerRating, qm = null) {
     try {
-      const targetFinalLevel = this.determineFinalQuestionLevel(playerRating, difficulty, qm);
+      const targetFinalLevel = this.determineFinalQuestionLevel(
+        playerRating,
+        difficulty,
+        qm
+      );
 
-      console.log(`Generating question - Rating: ${playerRating}, Difficulty: ${difficulty}, QM: ${qm}, Target level: ${targetFinalLevel}`);
+      // Try symbol-specific cache first
+      const symbolKey = symbols
+        ? `${difficulty}_${targetFinalLevel}_${JSON.stringify(symbols)}`
+        : null;
+      if (symbolKey && this.symbolCache.has(symbolKey)) {
+        const cachedPool = this.symbolCache.get(symbolKey);
+        if (cachedPool.length > 0) {
+          const question =
+            cachedPool[Math.floor(Math.random() * cachedPool.length)];
+          return { ...question, qm };
+        }
+      }
 
+      // Get from primary cache
       const cacheKey = `${difficulty}_${targetFinalLevel}`;
       let pool = this.questionCache.get(cacheKey) || [];
 
+      // Fallback to full load if cache empty
       if (pool.length === 0) {
-        console.log(`No questions found for ${cacheKey}, falling back to full load`);
+        console.log(
+          `⚠️ No questions found for ${cacheKey}, falling back to full load`
+        );
         const allQs = getQuestions();
-        pool = allQs.filter(q => q.difficulty === difficulty && q.finalLevel === targetFinalLevel);
+        pool = allQs.filter(
+          (q) =>
+            q.difficulty === difficulty && q.finalLevel === targetFinalLevel
+        );
       }
 
+      // Filter by symbols if specified
       if (symbols && symbols.length > 0) {
-        const symbolList = Array.isArray(symbols) 
-          ? symbols.map(s => s.toLowerCase().trim())
+        const symbolList = Array.isArray(symbols)
+          ? symbols.map((s) => s.toLowerCase().trim())
           : [symbols.toLowerCase().trim()];
 
-        pool = pool.filter(q => {
+        pool = pool.filter((q) => {
           if (!q.symbol) return false;
-          const qSymbols = q.symbol.split(",").map(s => s.trim().toLowerCase());
-          return symbolList.some(sym => qSymbols.includes(sym));
+          const qSymbols = q.symbol
+            .split(",")
+            .map((s) => s.trim().toLowerCase());
+          return symbolList.some((sym) => qSymbols.includes(sym));
         });
+
+        // Cache the symbol-filtered results
+        if (symbolKey && pool.length > 0) {
+          this.symbolCache.set(symbolKey, pool);
+        }
       }
 
+      // Validate pool
       if (pool.length === 0) {
-        throw new Error(`No questions available for difficulty: ${difficulty}, level: ${targetFinalLevel}, symbols: ${symbols}`);
+        throw new Error(
+          `No questions available for difficulty: ${difficulty}, level: ${targetFinalLevel}, symbols: ${JSON.stringify(
+            symbols
+          )}`
+        );
       }
 
+      // Select random question
       const question = pool[Math.floor(Math.random() * pool.length)];
       return { ...question, qm };
     } catch (error) {
-      console.error("Error generating question:", error);
+      console.error("❌ Error generating question:", error);
       throw error;
     }
   }
@@ -148,9 +191,13 @@ class QuestionService {
 
     for (const tier of tiers) {
       if (playerRating <= tier.max) {
-        return questionFinalLevel <= tier.thresh 
-          ? (isCorrect ? 2 : -1) 
-          : (isCorrect ? 1 : -1);
+        return questionFinalLevel <= tier.thresh
+          ? isCorrect
+            ? 2
+            : -1
+          : isCorrect
+          ? 1
+          : -1;
       }
     }
 
@@ -171,19 +218,19 @@ class QuestionService {
 
   generateQuestions(count, difficulty = null, category = null) {
     const questions = [];
-    const defaultSymbols = ['+', '-', '*', '/'];
+    const defaultSymbols = ["sum", "difference", "product", "quotient"];
 
     for (let i = 0; i < count; i++) {
       try {
         const question = this.generateQuestion(
-          difficulty || 'medium',
+          difficulty || "medium",
           defaultSymbols,
           1200,
           null
         );
         questions.push(question);
       } catch (error) {
-        console.error(`Error generating question ${i + 1}:`, error);
+        console.error(`❌ Error generating question ${i + 1}:`, error);
       }
     }
 
@@ -191,201 +238,92 @@ class QuestionService {
   }
 
   checkAnswer(question, givenAnswer) {
-    return String(givenAnswer).trim() === String(question.answer).trim();
+    const correctAnswer = String(question.answer).trim();
+    const userAnswer = String(givenAnswer).trim();
+    return userAnswer === correctAnswer;
+  }
+
+  // ✅ NEW: Get cache statistics
+  getCacheStatistics() {
+    const cacheStats = {
+      totalQuestionsLoaded: this.totalQuestionsLoaded,
+      primaryCacheEntries: this.questionCache.size,
+      symbolCacheEntries: this.symbolCache.size,
+      byDifficulty: {},
+    };
+
+    // Count questions per difficulty
+    for (const [key, questions] of this.questionCache) {
+      const [difficulty] = key.split("_");
+      if (!cacheStats.byDifficulty[difficulty]) {
+        cacheStats.byDifficulty[difficulty] = 0;
+      }
+      cacheStats.byDifficulty[difficulty] += questions.length;
+    }
+
+    return cacheStats;
+  }
+
+  // ✅ NEW: Clear symbol cache (frees memory)
+  clearSymbolCache() {
+    const size = this.symbolCache.size;
+    this.symbolCache.clear();
+    console.log(`🧹 Cleared symbol cache (${size} entries)`);
+  }
+
+  // ✅ NEW: Validate question pool availability
+  validateQuestionAvailability(difficulty, level, symbols = null) {
+    const cacheKey = `${difficulty}_${level}`;
+    let pool = this.questionCache.get(cacheKey) || [];
+
+    if (symbols && symbols.length > 0) {
+      const symbolList = Array.isArray(symbols)
+        ? symbols.map((s) => s.toLowerCase().trim())
+        : [symbols.toLowerCase().trim()];
+
+      pool = pool.filter((q) => {
+        if (!q.symbol) return false;
+        const qSymbols = q.symbol.split(",").map((s) => s.trim().toLowerCase());
+        return symbolList.some((sym) => qSymbols.includes(sym));
+      });
+    }
+
+    return {
+      available: pool.length > 0,
+      count: pool.length,
+      difficulty,
+      level,
+      symbols,
+    };
+  }
+
+  // ✅ NEW: Get question distribution
+  getQuestionDistribution() {
+    const distribution = {
+      byDifficulty: {},
+      byLevel: {},
+      total: 0,
+    };
+
+    for (const [key, questions] of this.questionCache) {
+      const [difficulty, level] = key.split("_");
+
+      if (!distribution.byDifficulty[difficulty]) {
+        distribution.byDifficulty[difficulty] = {};
+      }
+
+      distribution.byDifficulty[difficulty][level] = questions.length;
+
+      if (!distribution.byLevel[level]) {
+        distribution.byLevel[level] = 0;
+      }
+      distribution.byLevel[level] += questions.length;
+
+      distribution.total += questions.length;
+    }
+
+    return distribution;
   }
 }
 
-// Export using CommonJS
 module.exports = { QuestionService };
-
-
-
-
-// const { getQuestions } = require('../loadQuestion');
-
-// class QuestionService {
-//     constructor() {
-//         this.questions = [];
-//         this.loadQuestions();
-//     }
-
-//     loadQuestions() {
-//         try {
-//             this.questions = getQuestions();
-//             console.log(`QuestionService: Loaded ${this.questions.length} questions`);
-//         } catch (error) {
-//             console.error('QuestionService: Error loading questions:', error);
-//             this.questions = [];
-//         }
-//     }
-
-//     /**
-//      * Get a question for the game based on difficulty, rating, and question meter
-//      */
-//     getQuestionForGame(difficulty, playerRating, questionMeter = null) {
-//         try {
-//             // Determine the final level using the same logic as the controller
-//             const targetFinalLevel = this.determineFinalQuestionLevel(playerRating, difficulty, questionMeter);
-            
-//             // Default symbols for math game (you can modify this based on your game logic)
-//             const symbols = ['sum', 'difference', 'product', 'quotient'];
-            
-//             // Filter questions by difficulty and final level
-//             let pool = this.questions.filter(q => {
-//                 return q.difficulty === difficulty && q.finalLevel === targetFinalLevel;
-//             });
-
-//             // Further filter by symbol match
-//             pool = pool.filter(q => {
-//                 if (!q.symbol) return false;
-
-//                 const qSymbols = q.symbol
-//                     .split(',')
-//                     .map(s => s.trim().toLowerCase())
-//                     .filter(s => s);
-
-//                 return symbols.some(sym => qSymbols.includes(sym));
-//             });
-
-//             if (pool.length === 0) {
-//                 console.warn(`No questions found for difficulty: ${difficulty}, level: ${targetFinalLevel}`);
-//                 return null;
-//             }
-
-//             // Select random question from pool
-//             const selectedQuestion = pool[Math.floor(Math.random() * pool.length)];
-            
-//             return {
-//                 id: selectedQuestion.questionKey,
-//                 question: selectedQuestion.question,
-//                 input1: selectedQuestion.input1,
-//                 input2: selectedQuestion.input2,
-//                 answer: selectedQuestion.answer,
-//                 difficulty: selectedQuestion.difficulty,
-//                 level: selectedQuestion.finalLevel,
-//                 symbol: selectedQuestion.symbol,
-//                 options: this.generateOptions(selectedQuestion) // For multiple choice if needed
-//             };
-
-//         } catch (error) {
-//             console.error('QuestionService: Error getting question:', error);
-//             return null;
-//         }
-//     }
-
-//     /**
-//      * Generate multiple choice options for a question (if needed)
-//      */
-//     generateOptions(question) {
-//         const correctAnswer = parseFloat(question.answer);
-//         if (isNaN(correctAnswer)) return null;
-
-//         const options = [correctAnswer];
-        
-//         // Generate 3 wrong answers
-//         for (let i = 0; i < 3; i++) {
-//             let wrongAnswer;
-//             do {
-//                 const variation = Math.floor(Math.random() * 20) - 10; // ±10 variation
-//                 wrongAnswer = correctAnswer + variation;
-//             } while (options.includes(wrongAnswer) || wrongAnswer === correctAnswer);
-            
-//             options.push(wrongAnswer);
-//         }
-
-//         // Shuffle options
-//         for (let i = options.length - 1; i > 0; i--) {
-//             const j = Math.floor(Math.random() * (i + 1));
-//             [options[i], options[j]] = [options[j], options[i]];
-//         }
-
-//         return options;
-//     }
-
-//     /**
-//      * Determine question level from QM value (copied from controller)
-//      */
-//     getQuestionLevelFromQM(qm) {
-//         const qmRanges = [
-//             { level: 1, start: 0, end: 5 },
-//             { level: 2, start: 6, end: 9 },
-//             { level: 3, start: 10, end: 13 },
-//             { level: 4, start: 14, end: 17 },
-//             { level: 5, start: 18, end: 21 },
-//             { level: 6, start: 22, end: 25 },
-//             { level: 7, start: 26, end: 29 },
-//             { level: 8, start: 30, end: 33 },
-//             { level: 9, start: 34, end: 37 },
-//             { level: 10, start: 38, end: 45 },
-//         ];
-
-//         for (const range of qmRanges) {
-//             if (qm >= range.start && qm <= range.end) {
-//                 return range.level;
-//             }
-//         }
-
-//         return 10;
-//     }
-
-//     /**
-//      * Determine question level from player rating (copied from controller)
-//      */
-//     determineQuestionLevel(playerRating, difficulty) {
-//         if (playerRating < 800) {
-//             return 1;
-//         } else if (playerRating < 1200) {
-//             return 2;
-//         } else if (playerRating < 1600) {
-//             return difficulty === "easy" ? 2 : 3;
-//         } else if (playerRating < 2000) {
-//             return difficulty === "hard" ? 4 : 3;
-//         } else {
-//             if (difficulty === "medium") return 4;
-//             if (difficulty === "hard") return 5;
-//             return 3;
-//         }
-//     }
-
-//     /**
-//      * Determine final question level (copied from controller)
-//      */
-//     determineFinalQuestionLevel(playerRating, difficulty, qm = null) {
-//         if (qm !== null && qm !== undefined && qm >= 0) {
-//             const qmLevel = this.getQuestionLevelFromQM(qm);
-//             console.log(`QuestionService: Using QM-based level: QM=${qm} -> Level=${qmLevel}`);
-//             return qmLevel;
-//         }
-
-//         const ratingLevel = this.determineQuestionLevel(playerRating, difficulty);
-//         console.log(`QuestionService: Using rating-based level: Rating=${playerRating}, Difficulty=${difficulty} -> Level=${ratingLevel}`);
-//         return ratingLevel;
-//     }
-
-//     /**
-//      * Get question statistics
-//      */
-//     getStatistics() {
-//         const stats = {
-//             total: this.questions.length,
-//             byDifficulty: {},
-//             byFinalLevel: {}
-//         };
-
-//         this.questions.forEach(q => {
-//             stats.byDifficulty[q.difficulty] = (stats.byDifficulty[q.difficulty] || 0) + 1;
-//             stats.byFinalLevel[q.finalLevel] = (stats.byFinalLevel[q.finalLevel] || 0) + 1;
-//         });
-
-//         return stats;
-//     }
-
-//     /**
-//      * Reload questions from Excel file
-//      */
-//     reloadQuestions() {
-//         this.loadQuestions();
-//     }
-// }
-
-// module.exports = { QuestionService };
