@@ -260,6 +260,8 @@ module.exports = function registerSocketHandlers(io) {
           throw new Error("userId (MongoDB ID) is required");
         }
 
+         socket.join(socket.id);
+
         const player = playerManager.addPlayer(socket.id, {
           id: playerData.userId,
           username: playerData.username,
@@ -281,6 +283,7 @@ module.exports = function registerSocketHandlers(io) {
         });
 
         console.log(`✅ ${player.username} joined lobby (Rating: ${player.rating})`);
+        console.log(`✅ Socket ${socket.id} joined room ${socket.id}`);
 
         // Get current queue status
         const queueStatus = await matchmakingService.getQueueStatus();
