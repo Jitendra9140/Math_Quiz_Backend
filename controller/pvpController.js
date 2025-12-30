@@ -260,7 +260,7 @@ module.exports = function registerSocketHandlers(io) {
           throw new Error("userId (MongoDB ID) is required");
         }
 
-         socket.join(socket.id);
+        socket.join(socket.id);
 
         const player = playerManager.addPlayer(socket.id, {
           id: playerData.userId,
@@ -285,7 +285,6 @@ module.exports = function registerSocketHandlers(io) {
         console.log(`✅ ${player.username} joined lobby (Rating: ${player.rating})`);
         console.log(`✅ Socket ${socket.id} joined room ${socket.id}`);
 
-        // Get current queue status
         const queueStatus = await matchmakingService.getQueueStatus();
         console.log(`📊 Queue status: ${queueStatus.totalInQueue} players waiting`);
 
@@ -366,10 +365,8 @@ module.exports = function registerSocketHandlers(io) {
         const gameRoom = gameRoomManager.getPlayerGameRoom(player.id);
         if (!gameRoom) throw new Error("Game room not found");
 
-        // Record the answer
         gameRoom.submitAnswer(player.id, data.answer, data.timeSpent);
 
-        // Broadcast score update to opponent
         const opponent = gameRoom.getOpposingPlayer(player.id);
         if (opponent) {
           const playerScore = gameRoom.playerScores.get(player.id);
@@ -380,7 +377,6 @@ module.exports = function registerSocketHandlers(io) {
           });
         }
 
-        // Generate next question for answerer
         gameRoom.emitNextQuestion(player.id);
       } catch (err) {
         console.error("❌ submit-answer error:", err);
@@ -407,6 +403,39 @@ module.exports = function registerSocketHandlers(io) {
         });
       } catch (error) {
         socket.emit("error", { message: error.message });
+      }
+    });
+
+    /* ========================================
+       GAME ENDED (NORMAL OR TIME EXPIRED)
+    ======================================== */
+    socket.on("game-ended", async () => {
+      try {
+        const player = playerManager.getPlayer(socket.id);
+        if (!player) {
+          console.log("❌ Player not found for game-ended");
+          return;
+        }
+
+        const gameRoom = gameRoomManager.getPlayerGameRoom(player.id);
+        if (!gameRoom) {
+          console.log("❌ Game room not found for game-ended");
+          return;
+        }
+
+        console.log(`🏁 Game ended for room: ${gameRoom.id}`);
+
+        // End the game if not already ended
+        if (gameRoom.gameState !== "completed") {
+          await gameRoom.endGame();
+        }
+
+        // ✅ CRITICAL: Clean up the game room
+        gameRoomManager.removeGameRoom(gameRoom.id);
+
+        console.log(`✅ Game cleanup complete for ${player.username}`);
+      } catch (error) {
+        console.error("❌ game-ended error:", error);
       }
     });
 
@@ -471,7 +500,7 @@ module.exports = function registerSocketHandlers(io) {
           console.log(`📤 Sent game-ended to ${remainingPlayer.username}`);
         }
 
-        // Remove the game room
+        // ✅ CRITICAL: Remove the game room
         gameRoomManager.removeGameRoom(gameRoom.id);
         console.log(`🗑️ Game room removed: ${gameRoom.id}`);
       }
