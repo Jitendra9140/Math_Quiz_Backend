@@ -18,10 +18,20 @@ class GameRoomManager {
   }
 
   createGameRoom(players) {
-    // Validate players not already in game
+    // ✅ Clean up any stale mappings FIRST
     players.forEach((p) => {
-      if (this.playerToRoom.has(p.id)) {
-        throw new Error(`Player already in a game: ${p.id} (${p.username})`);
+      const existingRoomId = this.playerToRoom.get(p.id);
+      if (existingRoomId) {
+        const existingRoom = this.gameRooms.get(existingRoomId);
+
+        // If the old game room doesn't exist anymore, clean up the stale mapping
+        if (!existingRoom) {
+          console.log(`🧹 Cleaning stale mapping for ${p.username} (${p.id})`);
+          this.playerToRoom.delete(p.id);
+        } else {
+          // Room still exists - this is a real duplicate
+          throw new Error(`Player already in a game: ${p.id} (${p.username})`);
+        }
       }
     });
 
