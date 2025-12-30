@@ -95,8 +95,10 @@ class RedisMatchmakingService {
     );
 
     try {
-      // Store callback
+      // ✅ Store callback FIRST
       this.playerCallbacks.set(player.id, onMatchFound);
+      console.log(`✅ Stored callback for ${player.username} (${player.id})`);
+      console.log(`📋 Total callbacks stored: ${this.playerCallbacks.size}`);
 
       const eloBucket = this.getELOBucket(player.rating);
       const queueKey = this.getQueueKey(player.diff, player.timer, eloBucket);
@@ -157,6 +159,8 @@ class RedisMatchmakingService {
         return false; // No one in queue
       }
 
+      console.log(`🔎 Found ${playersInQueue.length} players in queue for ${player.username}`);
+
       // Find best opponent (closest rating)
       let bestOpponent = null;
       let smallestDiff = Infinity;
@@ -193,6 +197,7 @@ class RedisMatchmakingService {
       }
 
       if (bestOpponent) {
+        console.log(`✅ Best opponent found: ${bestOpponent.username}`);
         // Match found!
         await this.createMatch(player, bestOpponent);
         return true;
@@ -261,6 +266,11 @@ class RedisMatchmakingService {
         `🎮 Creating match: ${player1.username} vs ${player2.username}`
       );
 
+      // ✅ DEBUG: Check callbacks BEFORE creating game room
+      console.log(`📋 Total callbacks in map: ${this.playerCallbacks.size}`);
+      console.log(`   Player1 (${player1.id}) callback exists: ${this.playerCallbacks.has(player1.id)}`);
+      console.log(`   Player2 (${player2.id}) callback exists: ${this.playerCallbacks.has(player2.id)}`);
+
       // Mark both as in game
       player1.isInGame = true;
       player2.isInGame = true;
@@ -276,13 +286,37 @@ class RedisMatchmakingService {
       const callback1 = this.playerCallbacks.get(player1.id);
       const callback2 = this.playerCallbacks.get(player2.id);
 
+      console.log(`📞 Callback1 type: ${typeof callback1}`);
+      console.log(`📞 Callback2 type: ${typeof callback2}`);
+
       // Clean up callbacks
       this.playerCallbacks.delete(player1.id);
       this.playerCallbacks.delete(player2.id);
 
       // Notify both players
-      if (callback1) callback1(gameRoom);
-      if (callback2) callback2(gameRoom);
+      if (callback1) {
+        console.log(`📤 Calling callback1 for ${player1.username}`);
+        try {
+          callback1(gameRoom);
+          console.log(`✅ Callback1 executed successfully`);
+        } catch (err) {
+          console.error(`❌ Error executing callback1:`, err);
+        }
+      } else {
+        console.log(`❌ No callback1 for ${player1.username}`);
+      }
+      
+      if (callback2) {
+        console.log(`📤 Calling callback2 for ${player2.username}`);
+        try {
+          callback2(gameRoom);
+          console.log(`✅ Callback2 executed successfully`);
+        } catch (err) {
+          console.error(`❌ Error executing callback2:`, err);
+        }
+      } else {
+        console.log(`❌ No callback2 for ${player2.username}`);
+      }
 
       console.log(`✅ Match created: ${gameRoom.id}`);
     } catch (error) {
@@ -310,8 +344,8 @@ class RedisMatchmakingService {
       // Remove player metadata
       await this.redisClient.del(this.getPlayerKey(player.id));
 
-      // Remove callback
-      this.playerCallbacks.delete(player.id);
+      // ✅ DON'T remove callback here - it's needed for match notification!
+      // The callback will be removed after match creation in createMatch()
 
       player.isInGame = false;
     } catch (error) {
