@@ -1,509 +1,307 @@
+// handlers/socketHandler.js
+const {
+  RedisMatchmakingService,
+} = require("../services/RedisMatchmakingService");
+const { GameRoomManager } = require("../services/GameRoomManager");
+const { PlayerManager } = require("../services/PlayerManager");
+const { QuestionService } = require("../services/QuestionService");
 const { getRedisClient } = require("../config/redis");
 
-class RedisMatchmakingService {
-  constructor(playerManager, gameRoomManager) {
-    this.playerManager = playerManager;
-    this.gameRoomManager = gameRoomManager;
-    this.redisClient = null;
-    this.isInitialized = false;
+module.exports = function registerSocketHandlers(io) {
+  const playerManager = new PlayerManager();
+  const questionService = new QuestionService();
+  const gameRoomManager = new GameRoomManager(questionService, io);
+  const matchmakingService = new RedisMatchmakingService(
+    playerManager,
+    gameRoomManager
+  );
 
-    // Callback storage: playerId -> callback
-    this.playerCallbacks = new Map();
+  io.on("connection", async (socket) => {
+    console.log(`✅ Player connected: ${socket.id}`);
 
-    // Initialize Redis connection
-    this.initRedis();
-
-    // Background cleanup job (remove expired entries every 30s)
-    this.cleanupInterval = setInterval(
-      () => this.cleanupExpiredPlayers(),
-      30000
-    );
-  }
-
-  async initRedis() {
+    // Test Redis connection
     try {
-      this.redisClient = await getRedisClient();
-      this.isInitialized = true;
-      console.log("✅ RedisMatchmakingService initialized");
-    } catch (error) {
-      console.error("❌ Failed to initialize Redis:", error);
-      this.isInitialized = false;
-    }
-  }
-
-  /**
-   * Generate Redis keys for ELO-based bucketing
-   * Rating buckets: 0-400, 400-800, 800-1200, 1200-1600, 1600-2000, 2000+
-   */
-  getELOBucket(rating) {
-    if (rating < 400) return "0-400";
-    if (rating < 800) return "400-800";
-    if (rating < 1200) return "800-1200";
-    if (rating < 1600) return "1200-1600";
-    if (rating < 2000) return "1600-2000";
-    return "2000+";
-  }
-
-  /**
-   * Get adjacent buckets for expanded search
-   */
-  getAdjacentBuckets(bucket) {
-    const buckets = [
-      "0-400",
-      "400-800",
-      "800-1200",
-      "1200-1600",
-      "1600-2000",
-      "2000+",
-    ];
-    const index = buckets.indexOf(bucket);
-
-    const adjacent = [bucket]; // Always include own bucket
-
-    if (index > 0) adjacent.unshift(buckets[index - 1]); // Lower bucket
-    if (index < buckets.length - 1) adjacent.push(buckets[index + 1]); // Higher bucket
-
-    return adjacent;
-  }
-
-  /**
-   * Generate Redis queue key
-   * Format: matchmaking:{difficulty}:{timer}:{eloBucket}
-   */
-  getQueueKey(difficulty, timer, eloBucket) {
-    return `matchmaking:${difficulty}:${timer}:${eloBucket}`;
-  }
-
-  /**
-   * Generate player metadata key
-   * Format: player:{playerId}
-   */
-  getPlayerKey(playerId) {
-    return `player:${playerId}`;
-  }
-
-  /**
-   * Add player to matchmaking queue
-   */
-  async findMatch(player, onMatchFound) {
-    if (!this.isInitialized) {
-      await this.initRedis();
+      const redis = await getRedisClient();
+      await redis.ping();
+      console.log("✅ Redis connection verified");
+    } catch (err) {
+      console.error("❌ Redis connection failed:", err);
     }
 
-    console.log(
-      `🔍 Finding match for ${player.username} (Rating: ${player.rating})`
-    );
+    /* ========================================
+       JOIN LOBBY & START MATCHMAKING
+    ======================================== */
+    socket.on("join-lobby", async (playerData) => {
+      try {
+        if (!playerData.userId) {
+          throw new Error("userId (MongoDB ID) is required");
+        }
 
-    try {
-      // ✅ Store callback FIRST
-      this.playerCallbacks.set(player.id, onMatchFound);
-      console.log(`✅ Stored callback for ${player.username} (${player.id})`);
-      console.log(`📋 Total callbacks stored: ${this.playerCallbacks.size}`);
+        socket.join(socket.id);
 
-      const eloBucket = this.getELOBucket(player.rating);
-      const queueKey = this.getQueueKey(player.diff, player.timer, eloBucket);
+        const player = playerManager.addPlayer(socket.id, {
+          id: playerData.userId,
+          username: playerData.username,
+          email: playerData.email,
+          rating: playerData.rating,
+          diff: playerData.diff,
+          timer: playerData.timer,
+          symbol: playerData.symbol,
+        });
 
-      // Store player metadata
-      const playerData = {
-        id: player.id,
-        username: player.username,
-        rating: player.rating,
-        diff: player.diff,
-        timer: player.timer,
-        socketId: player.socketId,
-        joinedAt: Date.now(),
-      };
+        socket.emit("lobby-joined", {
+          success: true,
+          player: {
+            id: player.id,
+            socketId: player.socketId,
+            username: player.username,
+            rating: player.rating,
+          },
+        });
 
-      await this.redisClient.setEx(
-        this.getPlayerKey(player.id),
-        300, // 5 minutes TTL
-        JSON.stringify(playerData)
-      );
+        console.log(
+          `✅ ${player.username} joined lobby (Rating: ${player.rating})`
+        );
+        console.log(`✅ Socket ${socket.id} joined room ${socket.id}`);
 
-      // Try immediate matching in same bucket
-      const matched = await this.tryMatchInBucket(player, queueKey, eloBucket);
+        const queueStatus = await matchmakingService.getQueueStatus();
+        console.log(
+          `📊 Queue status: ${queueStatus.totalInQueue} players waiting`
+        );
 
-      if (matched) {
-        console.log(`⚡ Instant match found for ${player.username}`);
+        // Start Redis-based matchmaking
+        await matchmakingService.findMatch(player, (gameRoom) => {
+          console.log(`🎮 Match found: ${player.username} vs opponent`);
+
+          const opponent = gameRoom.getOpposingPlayer(player.id);
+
+          // Notify both players about the match
+          const players = gameRoom.getPlayers();
+          players.forEach((p) => {
+            const otherPlayer = players.find((pl) => pl.id !== p.id);
+
+            console.log(
+              `📤 Sending match-found to ${p.username} (${p.socketId})`
+            );
+
+            io.to(p.socketId).emit("match-found", {
+              gameRoom: gameRoom.getPublicData(),
+              opponent: {
+                id: otherPlayer.id,
+                username: otherPlayer.username,
+                rating: otherPlayer.rating,
+              },
+              myPlayerId: p.id,
+              initialQuestionMeter: gameRoom.questionMeter,
+            });
+          });
+
+          // Start the game after a brief delay
+          setTimeout(() => {
+            gameRoom.startGame();
+            console.log(`🚀 GAME STARTED: ${gameRoom.id}`);
+
+            players.forEach((p) => {
+              console.log(`📤 Sending game-started to ${p.username}`);
+
+              io.to(p.socketId).emit("game-started", {
+                gameState: gameRoom.getGameState(),
+                currentQuestion: gameRoom.getCurrentQuestion(),
+                myPlayerId: p.id,
+              });
+            });
+          }, 3000);
+        });
+      } catch (error) {
+        console.error("❌ join-lobby error:", error);
+        socket.emit("error", { message: error.message });
+      }
+    });
+
+    /* ========================================
+       CANCEL MATCHMAKING SEARCH
+    ======================================== */
+    socket.on("cancel_search", async () => {
+      try {
+        const player = playerManager.getPlayer(socket.id);
+        if (player) {
+          await matchmakingService.removeFromQueue(player);
+          console.log(`❌ ${player.username} cancelled search`);
+
+          socket.emit("search-cancelled", {
+            message: "Matchmaking cancelled",
+          });
+        }
+      } catch (error) {
+        console.error("❌ cancel_search error:", error);
+      }
+    });
+
+    /* ========================================
+       SUBMIT ANSWER
+    ======================================== */
+    socket.on("submit-answer", (data) => {
+      try {
+        const player = playerManager.getPlayer(socket.id);
+        if (!player) throw new Error("Player not found");
+
+        const gameRoom = gameRoomManager.getPlayerGameRoom(player.id);
+        if (!gameRoom) throw new Error("Game room not found");
+
+        gameRoom.submitAnswer(player.id, data.answer, data.timeSpent);
+
+        const opponent = gameRoom.getOpposingPlayer(player.id);
+        if (opponent) {
+          const playerScore = gameRoom.playerScores.get(player.id);
+          io.to(opponent.socketId).emit("opponent-score-update", {
+            opponentId: player.id,
+            score: playerScore.score,
+            correctAnswers: playerScore.correctAnswers,
+          });
+        }
+
+        gameRoom.emitNextQuestion(player.id);
+      } catch (err) {
+        console.error("❌ submit-answer error:", err);
+        socket.emit("error", { message: err.message });
+      }
+    });
+
+    /* ========================================
+       GET GAME STATE
+    ======================================== */
+    socket.on("get-game-state", () => {
+      try {
+        const player = playerManager.getPlayer(socket.id);
+        if (!player) throw new Error("Player not found");
+
+        const gameRoom = gameRoomManager.getPlayerGameRoom(player.id);
+        if (!gameRoom) throw new Error("Game room not found");
+
+        socket.emit("game-state-update", {
+          gameState: gameRoom.getGameState(),
+          currentQuestion: gameRoom.getCurrentQuestion(),
+          questionMeter: gameRoom.questionMeter,
+          myPlayerId: player.id,
+        });
+      } catch (error) {
+        socket.emit("error", { message: error.message });
+      }
+    });
+
+    /* ========================================
+       GAME ENDED (NORMAL OR TIME EXPIRED)
+    ======================================== */
+    socket.on("game-ended", async () => {
+      try {
+        const player = playerManager.getPlayer(socket.id);
+        if (!player) {
+          console.log("❌ Player not found for game-ended");
+          return;
+        }
+
+        const gameRoom = gameRoomManager.getPlayerGameRoom(player.id);
+        if (!gameRoom) {
+          console.log("❌ Game room not found for game-ended");
+          return;
+        }
+
+        console.log(`🏁 Game ended for room: ${gameRoom.id}`);
+
+        // End the game if not already ended
+        if (gameRoom.gameState !== "completed") {
+          await gameRoom.endGame();
+        }
+
+        // ✅ CRITICAL: Clean up the game room
+        gameRoomManager.removeGameRoom(gameRoom.id);
+
+        console.log(`✅ Game cleanup complete for ${player.username}`);
+      } catch (error) {
+        console.error("❌ game-ended error:", error);
+      }
+    });
+
+    /* ========================================
+       GET QUEUE STATUS (ADMIN/DEBUG)
+    ======================================== */
+    socket.on("get-queue-status", async () => {
+      try {
+        const status = await matchmakingService.getQueueStatus();
+        const avgWaitTime = await matchmakingService.getAverageWaitTime();
+
+        socket.emit("queue-status", {
+          ...status,
+          averageWaitTime: avgWaitTime,
+        });
+      } catch (error) {
+        console.error("❌ get-queue-status error:", error);
+        socket.emit("error", { message: error.message });
+      }
+    });
+
+    /* ========================================
+       DISCONNECT HANDLER
+    ======================================== */
+    socket.on("disconnect", async () => {
+      console.log(`👋 Player disconnected: ${socket.id}`);
+
+      const player = playerManager.getPlayer(socket.id);
+      if (!player) {
         return;
       }
 
-      // No immediate match - add to queue
-      await this.redisClient.zAdd(queueKey, {
-        score: player.rating,
-        value: player.id,
-      });
+      console.log(`🔍 Handling disconnect for ${player.username}`);
 
-      console.log(`➕ Added ${player.username} to queue: ${queueKey}`);
+      // 1. REMOVE FROM MATCHMAKING QUEUE
+      await matchmakingService.removeFromQueue(player);
+      console.log("✅ Removed from matchmaking queue");
 
-      // Schedule expanded search after 5 seconds
-      setTimeout(() => this.tryExpandedSearch(player), 5000);
+      // 2. HANDLE GAME ROOM DISCONNECTION
+      const gameRoom = gameRoomManager.getPlayerGameRoom(player.id);
 
-      // Schedule wider search after 15 seconds
-      setTimeout(() => this.tryExpandedSearch(player, true), 15000);
-    } catch (error) {
-      console.error("❌ Error in findMatch:", error);
-      throw error;
-    }
-  }
+      if (gameRoom) {
+        console.log(`🎮 ${player.username} was in game room: ${gameRoom.id}`);
 
-  /**
-   * Try to find a match in a specific bucket
-   */
-  async tryMatchInBucket(player, queueKey, eloBucket) {
-    try {
-      // Get all players in this bucket (sorted by rating)
-      const playersInQueue = await this.redisClient.zRange(queueKey, 0, -1);
+        // Handle the disconnect in the game room
+        const gameResults = await gameRoom.handlePlayerDisconnect(player.id);
 
-      if (playersInQueue.length === 0) {
-        return false; // No one in queue
-      }
+        // Get the remaining player
+        const remainingPlayer = gameRoom
+          .getPlayers()
+          .find((p) => p.id !== player.id);
 
-      console.log(
-        `🔎 Found ${playersInQueue.length} players in queue for ${player.username}`
-      );
+        if (remainingPlayer && gameResults) {
+          console.log(`🏆 ${remainingPlayer.username} wins by disconnect`);
 
-      // Find best opponent (closest rating)
-      let bestOpponent = null;
-      let smallestDiff = Infinity;
+          io.to(remainingPlayer.socketId).emit("game-ended", {
+            reason: "opponent-disconnect",
+            gameResults: gameResults,
+            message: `${player.username} disconnected. You win!`,
+          });
 
-      for (const opponentId of playersInQueue) {
-        if (opponentId === player.id) continue; // Skip self
-
-        const opponentDataStr = await this.redisClient.get(
-          this.getPlayerKey(opponentId)
-        );
-
-        if (!opponentDataStr) {
-          // Player expired or left - remove from queue
-          await this.redisClient.zRem(queueKey, opponentId);
-          continue;
+          console.log(`📤 Sent game-ended to ${remainingPlayer.username}`);
         }
 
-        const opponentData = JSON.parse(opponentDataStr);
-
-        // Check if opponent is still valid
-        const opponent = this.playerManager.getPlayerById(opponentId);
-        if (!opponent || opponent.isInGame) {
-          await this.redisClient.zRem(queueKey, opponentId);
-          continue;
-        }
-
-        // Calculate rating difference
-        const ratingDiff = Math.abs(player.rating - opponentData.rating);
-
-        if (ratingDiff < smallestDiff) {
-          smallestDiff = ratingDiff;
-          bestOpponent = opponent;
-        }
+        // ✅ CRITICAL: Remove the game room
+        gameRoomManager.removeGameRoom(gameRoom.id);
+        console.log(`🗑️ Game room removed: ${gameRoom.id}`);
       }
 
-      if (bestOpponent) {
-        console.log(`✅ Best opponent found: ${bestOpponent.username}`);
-        // Match found!
-        await this.createMatch(player, bestOpponent);
-        return true;
-      }
+      // 3. REMOVE PLAYER (with grace period for reconnect)
+      playerManager.removePlayer(socket.id);
+      console.log(`🗑️ Player removed: ${player.username}`);
+    });
+  });
 
-      return false;
-    } catch (error) {
-      console.error("❌ Error in tryMatchInBucket:", error);
-      return false;
-    }
-  }
+  // Cleanup on server shutdown
+  process.on("SIGTERM", async () => {
+    console.log("🛑 Server shutting down, cleaning up matchmaking...");
+    await matchmakingService.destroy();
+  });
 
-  /**
-   * Try expanded search (adjacent buckets)
-   */
-  async tryExpandedSearch(player, wideSearch = false) {
-    try {
-      // Check if player still waiting
-      const playerData = await this.redisClient.get(
-        this.getPlayerKey(player.id)
-      );
-      if (!playerData) return; // Player left queue
-
-      const playerObj = this.playerManager.getPlayerById(player.id);
-      if (!playerObj || playerObj.isInGame) return; // Already matched
-
-      const eloBucket = this.getELOBucket(player.rating);
-      const bucketsToSearch = wideSearch
-        ? this.getAllBuckets()
-        : this.getAdjacentBuckets(eloBucket);
-
-      console.log(
-        `🔎 Expanded search for ${player.username} in buckets:`,
-        bucketsToSearch
-      );
-
-      for (const bucket of bucketsToSearch) {
-        const queueKey = this.getQueueKey(player.diff, player.timer, bucket);
-        const matched = await this.tryMatchInBucket(player, queueKey, bucket);
-
-        if (matched) {
-          console.log(`✅ Match found in bucket: ${bucket}`);
-          return;
-        }
-      }
-
-      console.log(`⏳ No match yet for ${player.username}, waiting...`);
-    } catch (error) {
-      console.error("❌ Error in tryExpandedSearch:", error);
-    }
-  }
-
-  /**
-   * Get all buckets for very wide search
-   */
-  getAllBuckets() {
-    return ["0-400", "400-800", "800-1200", "1200-1600", "1600-2000", "2000+"];
-  }
-
-  /**
-   * Create a match between two players
-   */
-  
-  async createMatch(player1, player2) {
-    try {
-      console.log(
-        `🎮 Creating match: ${player1.username} vs ${player2.username}`
-      );
-
-      // ✅ DEBUG: Check callbacks BEFORE creating game room
-      console.log(`📋 Total callbacks in map: ${this.playerCallbacks.size}`);
-      console.log(
-        `   Player1 (${player1.id}) callback exists: ${this.playerCallbacks.has(
-          player1.id
-        )}`
-      );
-      console.log(
-        `   Player2 (${player2.id}) callback exists: ${this.playerCallbacks.has(
-          player2.id
-        )}`
-      );
-
-      // ✅ Get callbacks FIRST (before any modifications)
-      const callback1 = this.playerCallbacks.get(player1.id);
-      const callback2 = this.playerCallbacks.get(player2.id);
-
-      console.log(`📞 Callback1 type: ${typeof callback1}`);
-      console.log(`📞 Callback2 type: ${typeof callback2}`);
-
-      // ✅ Create game room FIRST (before marking as in-game)
-      const gameRoom = this.gameRoomManager.createGameRoom([player1, player2]);
-
-      // ✅ Now mark both as in game (AFTER successful game room creation)
-      player1.isInGame = true;
-      player2.isInGame = true;
-
-      // ✅ Remove from Redis queues
-      await this.removeFromQueue(player1);
-      await this.removeFromQueue(player2);
-
-      // ✅ Clean up callbacks
-      this.playerCallbacks.delete(player1.id);
-      this.playerCallbacks.delete(player2.id);
-
-      // ✅ Notify both players
-      if (callback1) {
-        console.log(`📤 Calling callback1 for ${player1.username}`);
-        try {
-          callback1(gameRoom);
-          console.log(`✅ Callback1 executed successfully`);
-        } catch (err) {
-          console.error(`❌ Error executing callback1:`, err);
-        }
-      } else {
-        console.log(`❌ No callback1 for ${player1.username}`);
-      }
-
-      if (callback2) {
-        console.log(`📤 Calling callback2 for ${player2.username}`);
-        try {
-          callback2(gameRoom);
-          console.log(`✅ Callback2 executed successfully`);
-        } catch (err) {
-          console.error(`❌ Error executing callback2:`, err);
-        }
-      } else {
-        console.log(`❌ No callback2 for ${player2.username}`);
-      }
-
-      console.log(`✅ Match created: ${gameRoom.id}`);
-    } catch (error) {
-      console.error("❌ Error creating match:", error);
-      throw error;
-    }
-  }
-  /**
-   * Remove player from matchmaking queue
-   */
-  async removeFromQueue(player) {
-    try {
-      console.log(`❌ Removing ${player.username} from queue`);
-
-      const eloBucket = this.getELOBucket(player.rating);
-      const allBuckets = this.getAllBuckets(); // Remove from all buckets to be safe
-
-      // Remove from all possible queues
-      for (const bucket of allBuckets) {
-        const queueKey = this.getQueueKey(player.diff, player.timer, bucket);
-        await this.redisClient.zRem(queueKey, player.id);
-      }
-
-      // Remove player metadata
-      await this.redisClient.del(this.getPlayerKey(player.id));
-
-      // ✅ DON'T remove callback here - it's needed for match notification!
-      // The callback will be removed after match creation in createMatch()
-
-      player.isInGame = false;
-    } catch (error) {
-      console.error("❌ Error removing from queue:", error);
-    }
-  }
-
-  /**
-   * Get queue statistics
-   */
-  async getQueueStatus() {
-    try {
-      if (!this.isInitialized) {
-        return { totalInQueue: 0, byBucket: {}, players: [] };
-      }
-
-      const allBuckets = this.getAllBuckets();
-      const difficulties = ["easy", "medium", "hard"];
-      const timers = [30, 60, 90];
-
-      const byBucket = {};
-      const allPlayers = [];
-
-      for (const diff of difficulties) {
-        for (const timer of timers) {
-          for (const bucket of allBuckets) {
-            const queueKey = this.getQueueKey(diff, timer, bucket);
-            const count = await this.redisClient.zCard(queueKey);
-
-            if (count > 0) {
-              const key = `${diff}-${timer}-${bucket}`;
-              byBucket[key] = count;
-
-              // Get player details
-              const playerIds = await this.redisClient.zRange(queueKey, 0, -1);
-              for (const playerId of playerIds) {
-                const playerDataStr = await this.redisClient.get(
-                  this.getPlayerKey(playerId)
-                );
-                if (playerDataStr) {
-                  const playerData = JSON.parse(playerDataStr);
-                  allPlayers.push({
-                    ...playerData,
-                    waitTime: Math.round(
-                      (Date.now() - playerData.joinedAt) / 1000
-                    ),
-                  });
-                }
-              }
-            }
-          }
-        }
-      }
-
-      return {
-        totalInQueue: allPlayers.length,
-        byBucket,
-        players: allPlayers,
-      };
-    } catch (error) {
-      console.error("❌ Error getting queue status:", error);
-      return { totalInQueue: 0, byBucket: {}, players: [] };
-    }
-  }
-
-  /**
-   * Get average wait time
-   */
-  async getAverageWaitTime() {
-    try {
-      const status = await this.getQueueStatus();
-      if (status.players.length === 0) return 0;
-
-      const totalWaitTime = status.players.reduce(
-        (sum, player) => sum + player.waitTime,
-        0
-      );
-
-      return Math.round(totalWaitTime / status.players.length);
-    } catch (error) {
-      console.error("❌ Error calculating average wait time:", error);
-      return 0;
-    }
-  }
-
-  /**
-   * Cleanup expired players from queues
-   */
-  async cleanupExpiredPlayers() {
-    try {
-      if (!this.isInitialized) return;
-
-      console.log("🧹 Running queue cleanup...");
-
-      const allBuckets = this.getAllBuckets();
-      const difficulties = ["easy", "medium", "hard"];
-      const timers = [30, 60, 90];
-
-      let cleanedCount = 0;
-
-      for (const diff of difficulties) {
-        for (const timer of timers) {
-          for (const bucket of allBuckets) {
-            const queueKey = this.getQueueKey(diff, timer, bucket);
-            const playerIds = await this.redisClient.zRange(queueKey, 0, -1);
-
-            for (const playerId of playerIds) {
-              const exists = await this.redisClient.exists(
-                this.getPlayerKey(playerId)
-              );
-
-              if (!exists) {
-                // Player metadata expired - remove from queue
-                await this.redisClient.zRem(queueKey, playerId);
-                cleanedCount++;
-              }
-            }
-          }
-        }
-      }
-
-      if (cleanedCount > 0) {
-        console.log(`🧹 Cleaned ${cleanedCount} expired players from queues`);
-      }
-    } catch (error) {
-      console.error("❌ Error in cleanup:", error);
-    }
-  }
-
-  /**
-   * Get queue size
-   */
-  async getQueueSize() {
-    const status = await this.getQueueStatus();
-    return status.totalInQueue;
-  }
-
-  /**
-   * Destroy service and cleanup
-   */
-  async destroy() {
-    if (this.cleanupInterval) {
-      clearInterval(this.cleanupInterval);
-    }
-
-    // Note: Don't close Redis client as it's shared
-    console.log("🛑 RedisMatchmakingService destroyed");
-  }
-}
-
-module.exports = { RedisMatchmakingService };
+  process.on("SIGINT", async () => {
+    console.log("🛑 Server interrupted, cleaning up matchmaking...");
+    await matchmakingService.destroy();
+  });
+};

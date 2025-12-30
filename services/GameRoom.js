@@ -1,229 +1,440 @@
-const { GameRoom } = require("./GameRoom.js");
+const Player = require("../models/Player");
+const PVPGame = require("../models/PVPGame");
 
-class GameRoomManager {
-  constructor(questionService, io) {
+/* ================================
+   DATABASE HELPERS (PLAYER ID)
+================================ */
+
+async function updatePlayerRatingInDatabase(playerId, delta, diff) {
+  try {
+    const player = await Player.findById(playerId);
+    if (!player) throw new Error(`Player not found: ${playerId}`);
+
+    player.pr.pvp[diff] += delta;
+    await player.save();
+
+    return player;
+  } catch (err) {
+    console.error("Error updating PvP rating:", err);
+    throw err;
+  }
+}
+
+async function savePVPGameToDatabase(gameData) {
+  try {
+    const {
+      player1Id,
+      player2Id,
+      player1Score,
+      player2Score,
+      gameDuration,
+      disconnectedPlayerId,
+    } = gameData;
+
+    let result = "Draw";
+    let winner = null;
+
+    if (disconnectedPlayerId) {
+      winner = disconnectedPlayerId === player1Id ? player2Id : player1Id;
+      result = disconnectedPlayerId === player1Id ? "Player2Won" : "Player1Won";
+    } else {
+      if (player1Score > player2Score) {
+        result = "Player1Won";
+        winner = player1Id;
+      } else if (player2Score > player1Score) {
+        result = "Player2Won";
+        winner = player2Id;
+      }
+    }
+
+    const pvpGame = new PVPGame({
+      player1: player1Id,
+      player2: player2Id,
+      scorePlayer1: player1Score,
+      scorePlayer2: player2Score,
+      winner,
+      result,
+      gameDuration: Math.floor(gameDuration / 1000),
+      playedAt: new Date(),
+    });
+
+    await pvpGame.save();
+    return pvpGame;
+  } catch (err) {
+    console.error("Error saving PVP game:", err);
+    throw err;
+  }
+}
+
+/* ================================
+   GAME ROOM
+================================ */
+
+class GameRoom {
+  constructor(players, questionService) {
+    this.id = `${players[0].id}_${players[1].id}_${Date.now()}`;
+
+    this.players = players;
     this.questionService = questionService;
-    this.gameRooms = new Map(); // roomId -> GameRoom
-    this.playerToRoom = new Map(); // playerId -> roomId
-    this.io = io;
+    this.createdAt = Date.now();
+    this.gameState = "waiting";
 
-    // ✅ NEW: Track game statistics
-    this.stats = {
-      totalGamesCreated: 0,
-      totalGamesCompleted: 0,
-      totalDisconnects: 0,
-      activeGames: 0,
+    this.playerProgress = new Map(players.map((p) => [p.id, 0]));
+    this.playerAnswers = new Map();
+    this.playerScores = new Map();
+    this.questions = [];
+
+    this.gameTimer = null;
+    this.questionTimer = null;
+
+    this.questionMeter = questionService.getInitialQuestionMeter(
+      players[0].rating,
+      players[1].rating
+    );
+
+    this.questionMeterController = null;
+    this.difficulty =
+      players[0].rating > players[1].rating ? players[1].diff : players[0].diff;
+
+    this.symbols = ["sum", "difference", "product", "quotient"];
+
+    this.gameSettings = {
+      questionsPerGame: 10,
+      timePerQuestion: 30000,
+      totalGameTime: 60000,
     };
-  }
 
-  createGameRoom(players) {
-    // ✅ Clean up any stale mappings FIRST with detailed logging
-    players.forEach((p) => {
-      const existingRoomId = this.playerToRoom.get(p.id);
-      if (existingRoomId) {
-        console.log(
-          `⚠️ Player ${p.username} (${p.id}) already mapped to room: ${existingRoomId}`
-        );
+    this.disconnectedPlayerId = null;
+    this.disconnectedAt = null;
 
-        const existingRoom = this.gameRooms.get(existingRoomId);
-
-        if (!existingRoom) {
-          console.log(
-            `🧹 Cleaning stale mapping for ${p.username} - room no longer exists`
-          );
-          this.playerToRoom.delete(p.id);
-        } else {
-          console.log(`❌ Room ${existingRoomId} still exists!`);
-          console.log(`   Room state: ${existingRoom.gameState}`);
-          console.log(
-            `   Room created: ${new Date(existingRoom.createdAt).toISOString()}`
-          );
-          console.log(
-            `   Room age: ${Math.round(
-              (Date.now() - existingRoom.createdAt) / 1000
-            )}s`
-          );
-
-          // ✅ If the game is completed, force cleanup
-          if (existingRoom.gameState === "completed") {
-            console.log(
-              `🧹 Force cleaning completed game room: ${existingRoomId}`
-            );
-            this.removeGameRoom(existingRoomId);
-          } else {
-            // Room still active - this is a real duplicate
-            throw new Error(
-              `Player already in a game: ${p.id} (${p.username})`
-            );
-          }
-        }
-      }
+    players.forEach((player) => {
+      this.playerScores.set(player.id, {
+        score: 0,
+        correctAnswers: 0,
+        totalTime: 0,
+        streak: 0,
+        maxStreak: 0,
+        questionsAnswered: 0,
+      });
     });
-
-    // Create game room
-    const gameRoom = new GameRoom(players, this.questionService);
-    gameRoom.bindIO(this.io);
-
-    // Store mappings
-    this.gameRooms.set(gameRoom.id, gameRoom);
-    players.forEach((p) => this.playerToRoom.set(p.id, gameRoom.id));
-
-    // Update stats
-    this.stats.totalGamesCreated++;
-    this.stats.activeGames = this.gameRooms.size;
-
-    console.log(`✅ Game room created: ${gameRoom.id}`);
-    console.log(`   Players: ${players.map((p) => p.username).join(" vs ")}`);
-    console.log(`   Active games: ${this.stats.activeGames}`);
-
-    return gameRoom;
   }
 
-  getGameRoom(roomId) {
-    return this.gameRooms.get(roomId);
+  bindIO(io) {
+    this.io = io;
   }
 
-  getPlayerGameRoom(playerId) {
-    const roomId = this.playerToRoom.get(playerId);
-    return roomId ? this.gameRooms.get(roomId) : null;
+  startGame() {
+    this.gameState = "active";
+    this.gameTimer = setTimeout(
+      () => this.endGame(),
+      this.gameSettings.totalGameTime
+    );
+    this.players.forEach((p) => this.emitNextQuestion(p.id));
   }
 
-  removeGameRoom(roomId) {
-    const gameRoom = this.gameRooms.get(roomId);
-    if (!gameRoom) {
-      console.warn(`⚠️ Attempted to remove non-existent game room: ${roomId}`);
-      return;
-    }
+  emitNextQuestion(playerId) {
+    const idx = this.playerProgress.get(playerId);
 
-    // Check if game was completed or disconnected
-    if (gameRoom.gameState === "completed") {
-      if (gameRoom.disconnectedPlayerId) {
-        this.stats.totalDisconnects++;
-      } else {
-        this.stats.totalGamesCompleted++;
-      }
-    }
-
-    // Remove player mappings
-    gameRoom.getPlayers().forEach((player) => {
-      console.log(
-        `🗑️ Removing player mapping: ${player.username} (${player.id})`
+    if (this.questions.length <= idx) {
+      const lowerRating = Math.min(...this.players.map((p) => p.rating));
+      const q = this.questionService.generateQuestion(
+        this.difficulty,
+        this.symbols,
+        lowerRating,
+        this.questionMeter
       );
-      this.playerToRoom.delete(player.id);
+
+      this.questions.push(q);
+      this.playerAnswers.set(`${idx}`, new Map());
+    }
+
+    const player = this.players.find((p) => p.id === playerId);
+
+    this.io.to(player.socketId).emit("next-question", {
+      question: this.questions[idx],
+      gameState: this.getGameState(),
+      questionMeter: this.questionMeter,
     });
 
-    // Remove game room
-    this.gameRooms.delete(roomId);
-
-    // Update stats
-    this.stats.activeGames = this.gameRooms.size;
-
-    console.log(`🗑️ Game room removed: ${roomId}`);
-    console.log(`   Active games: ${this.stats.activeGames}`);
+    this.playerProgress.set(playerId, idx + 1);
   }
 
-  // ✅ NEW: Force end a game (admin/cleanup)
-  async forceEndGame(roomId, reason = "forced") {
-    const gameRoom = this.getGameRoom(roomId);
-    if (!gameRoom) return null;
+  submitAnswer(playerId, answer, timeSpent) {
+    if (this.gameState !== "active") return;
 
-    console.log(`⚠️ Force ending game: ${roomId} (Reason: ${reason})`);
+    const idx = this.playerProgress.get(playerId) - 1;
+    const q = this.questions[idx];
+    if (!q) return;
 
-    const gameResults = await gameRoom.endGame();
-    this.removeGameRoom(roomId);
+    const answers = this.playerAnswers.get(`${idx}`);
+    if (answers.has(playerId)) return;
+
+    const isCorrect = this.questionService.checkAnswer(q, answer);
+    answers.set(playerId, { answer, isCorrect, timeSpent });
+
+    const ps = this.playerScores.get(playerId);
+    ps.questionsAnswered++;
+    ps.totalTime += timeSpent;
+
+    if (isCorrect) {
+      ps.correctAnswers++;
+      ps.streak++;
+      ps.maxStreak = Math.max(ps.maxStreak, ps.streak);
+      ps.score += 10;
+    } else {
+      ps.streak = 0;
+    }
+  }
+
+  async handlePlayerDisconnect(playerId) {
+    console.log(`🔌 Player ${playerId} disconnected from game ${this.id}`);
+
+    if (this.gameState !== "active" && this.gameState !== "waiting") {
+      console.log(`Game already ${this.gameState}, ignoring disconnect`);
+      return null;
+    }
+
+    this.disconnectedPlayerId = playerId;
+    this.disconnectedAt = Date.now();
+    this.gameState = "completed";
+
+    if (this.gameTimer) {
+      clearTimeout(this.gameTimer);
+      this.gameTimer = null;
+    }
+    if (this.questionTimer) {
+      clearTimeout(this.questionTimer);
+      this.questionTimer = null;
+    }
+
+    const remainingPlayer = this.players.find((p) => p.id !== playerId);
+    const disconnectedPlayer = this.players.find((p) => p.id === playerId);
+
+    if (!remainingPlayer) {
+      console.error("No remaining player found!");
+      return null;
+    }
+
+    const gameResults = await this.calculateDisconnectResults(
+      remainingPlayer,
+      disconnectedPlayer
+    );
+
+    await this.saveGameToDatabase(gameResults);
+
+    // ✅ CRITICAL: Mark players as NOT in game
+    this.markPlayersAsNotInGame();
+
+    if (this.io && remainingPlayer.socketId) {
+      this.io.to(remainingPlayer.socketId).emit("opponent-disconnected", {
+        message: "Your opponent has disconnected. You win!",
+        gameResults: gameResults,
+        finalQuestionMeter: this.questionMeter,
+        yourPlayerId: remainingPlayer.id,
+        disconnectedPlayerId: playerId,
+      });
+
+      console.log(
+        `📤 Sent opponent-disconnected to ${remainingPlayer.username}`
+      );
+    }
 
     return gameResults;
   }
 
-  // ✅ NEW: Get all active games with details
-  getActiveGames() {
-    const games = [];
+  async calculateDisconnectResults(winner, disconnectedPlayer) {
+    const winnerScore = this.playerScores.get(winner.id);
+    const disconnectedScore = this.playerScores.get(disconnectedPlayer.id);
 
-    for (const [roomId, gameRoom] of this.gameRooms) {
-      games.push({
-        id: roomId,
-        players: gameRoom.getPlayers().map((p) => ({
-          id: p.id,
-          username: p.username,
-          rating: p.rating,
-        })),
-        state: gameRoom.gameState,
-        createdAt: gameRoom.createdAt,
-        duration: Date.now() - gameRoom.createdAt,
-        difficulty: gameRoom.difficulty,
-        questionMeter: gameRoom.questionMeter,
-      });
-    }
+    const results = [
+      {
+        playerId: winner.id,
+        username: winner.username,
+        currentRating: winner.rating,
+        finalScore: winnerScore.score,
+        totalTime: winnerScore.totalTime,
+        correctAnswers: winnerScore.correctAnswers,
+        disconnected: false,
+      },
+      {
+        playerId: disconnectedPlayer.id,
+        username: disconnectedPlayer.username,
+        currentRating: disconnectedPlayer.rating,
+        finalScore: disconnectedScore.score,
+        totalTime: disconnectedScore.totalTime,
+        correctAnswers: disconnectedScore.correctAnswers,
+        disconnected: true,
+      },
+    ];
 
-    return games;
-  }
+    const ratingChanges = await this.calculateDisconnectRatingChanges(
+      results,
+      winner.id
+    );
 
-  // ✅ NEW: Get game by player socketId
-  getGameRoomBySocketId(socketId, playerManager) {
-    const player = playerManager.getPlayer(socketId);
-    if (!player) return null;
-    return this.getPlayerGameRoom(player.id);
-  }
-
-  getActiveGamesCount() {
-    return this.gameRooms.size;
-  }
-
-  getAllGameRooms() {
-    return Array.from(this.gameRooms.values());
-  }
-
-  // ✅ NEW: Get statistics
-  getStatistics() {
     return {
-      ...this.stats,
-      activeGames: this.gameRooms.size,
-      completionRate:
-        this.stats.totalGamesCreated > 0
-          ? (
-              (this.stats.totalGamesCompleted / this.stats.totalGamesCreated) *
-              100
-            ).toFixed(2) + "%"
-          : "0%",
-      disconnectRate:
-        this.stats.totalGamesCreated > 0
-          ? (
-              (this.stats.totalDisconnects / this.stats.totalGamesCreated) *
-              100
-            ).toFixed(2) + "%"
-          : "0%",
+      winner: results[0],
+      disconnectedPlayer: results[1],
+      players: results.map((r, i) => ({
+        ...r,
+        won: r.playerId === winner.id,
+        newRating: r.currentRating + ratingChanges[i],
+        ratingChange: ratingChanges[i],
+      })),
+      gameStats: {
+        duration: this.disconnectedAt - this.createdAt,
+        endReason: "disconnect",
+        disconnectedAt: this.disconnectedAt,
+      },
     };
   }
 
-  // ✅ NEW: Cleanup stale games (> 15 minutes old)
-  cleanupStaleGames() {
-    const now = Date.now();
-    const maxGameTime = 15 * 60 * 1000; // 15 minutes
+  async calculateDisconnectRatingChanges(playerResults, winnerId) {
+    const changes = [];
 
-    for (const [roomId, gameRoom] of this.gameRooms) {
-      const gameAge = now - gameRoom.createdAt;
-
-      if (gameAge > maxGameTime) {
-        console.log(
-          `🧹 Cleaning up stale game: ${roomId} (Age: ${Math.round(
-            gameAge / 1000
-          )}s)`
-        );
-        this.forceEndGame(roomId, "stale");
-      }
+    for (const p of playerResults) {
+      let delta = p.playerId === winnerId ? +5 : -10;
+      await updatePlayerRatingInDatabase(p.playerId, delta, this.difficulty);
+      changes.push(delta);
     }
+
+    return changes;
   }
 
-  // ✅ NEW: Reset statistics
-  resetStatistics() {
-    this.stats = {
-      totalGamesCreated: 0,
-      totalGamesCompleted: 0,
-      totalDisconnects: 0,
-      activeGames: this.gameRooms.size,
+  async endGame() {
+    if (this.gameState === "completed") {
+      console.log("Game already completed, skipping endGame");
+      return null;
+    }
+
+    this.gameState = "completed";
+    clearTimeout(this.gameTimer);
+    clearTimeout(this.questionTimer);
+
+    const gameResults = await this.calculateGameResults();
+    await this.saveGameToDatabase(gameResults);
+
+    // ✅ CRITICAL: Mark players as NOT in game
+    this.markPlayersAsNotInGame();
+
+    return gameResults;
+  }
+
+  async calculateGameResults() {
+    const results = this.players.map((player) => {
+      const s = this.playerScores.get(player.id);
+      return {
+        playerId: player.id,
+        username: player.username,
+        currentRating: player.rating,
+        finalScore: s.score,
+        totalTime: s.totalTime,
+        correctAnswers: s.correctAnswers,
+        disconnected: false,
+      };
+    });
+
+    const winner = results.reduce((a, b) =>
+      b.finalScore > a.finalScore ||
+      (b.finalScore === a.finalScore && b.totalTime < a.totalTime)
+        ? b
+        : a
+    );
+
+    const ratingChanges = await this.calculateRatingChanges(results, winner);
+
+    return {
+      winner,
+      players: results.map((r, i) => ({
+        ...r,
+        won: r.playerId === winner.playerId,
+        newRating: r.currentRating + ratingChanges[i],
+        ratingChange: ratingChanges[i],
+      })),
+      gameStats: {
+        duration: Date.now() - this.createdAt,
+        endReason: "normal",
+      },
     };
-    console.log("📊 Statistics reset");
+  }
+
+  async saveGameToDatabase(gameResults) {
+    const [p1, p2] = gameResults.players;
+
+    await savePVPGameToDatabase({
+      player1Id: p1.playerId,
+      player2Id: p2.playerId,
+      player1Score: p1.finalScore,
+      player2Score: p2.finalScore,
+      gameDuration: gameResults.gameStats.duration,
+      disconnectedPlayerId: this.disconnectedPlayerId,
+    });
+  }
+
+  async calculateRatingChanges(playerResults, winner) {
+    const changes = [];
+
+    for (const p of playerResults) {
+      let delta = p.playerId === winner.playerId ? +5 : -5;
+      await updatePlayerRatingInDatabase(p.playerId, delta, this.difficulty);
+      changes.push(delta);
+    }
+
+    return changes;
+  }
+
+  // ✅ NEW: Mark all players as not in game
+  markPlayersAsNotInGame() {
+    console.log(`🔓 Marking players as NOT in game for room ${this.id}`);
+    this.players.forEach((player) => {
+      player.isInGame = false;
+      console.log(
+        `   ✅ ${player.username} (${player.id}) - isInGame set to FALSE`
+      );
+    });
+  }
+
+  getGameState() {
+    return {
+      gameId: this.id,
+      state: this.gameState,
+      playerProgress: Object.fromEntries(this.playerProgress),
+      playerScores: Object.fromEntries(this.playerScores),
+      questionMeter: this.questionMeter,
+      timeRemaining: Math.max(
+        0,
+        this.gameSettings.totalGameTime - (Date.now() - this.createdAt)
+      ),
+      disconnectedPlayerId: this.disconnectedPlayerId,
+    };
+  }
+
+  getPlayers() {
+    return this.players;
+  }
+
+  getOpposingPlayer(playerId) {
+    return this.players.find((p) => p.id !== playerId) || null;
+  }
+
+  getCurrentQuestion() {
+    return this.questions[this.questions.length - 1] || null;
+  }
+
+  getPublicData() {
+    return {
+      id: this.id,
+      players: this.players.map((p) => ({
+        id: p.id,
+        username: p.username,
+        rating: p.rating,
+      })),
+      createdAt: this.createdAt,
+      gameState: this.gameState,
+      questionMeter: this.questionMeter,
+      difficulty: this.difficulty,
+    };
   }
 }
 
-module.exports = { GameRoomManager };
+module.exports = { GameRoom };
