@@ -180,7 +180,16 @@ class GameRoom {
       ps.correctAnswers++;
       ps.streak++;
       ps.maxStreak = Math.max(ps.maxStreak, ps.streak);
-      ps.score += 10;
+
+      // base score for correct answer
+      let points = 1;
+
+      // streak bonuses
+      if (ps.streak === 3) points += 2;
+      else if (ps.streak === 5) points += 3;
+      else if (ps.streak === 7) points += 5;
+
+      ps.score += points;
     } else {
       ps.streak = 0;
     }
