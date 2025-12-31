@@ -104,16 +104,18 @@ exports.signup = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      message: "OTP sent to your email. Please verify to complete registration.",
+      message:
+        "OTP sent to your email. Please verify to complete registration.",
       email,
-      otp
+      otp,
     });
   } catch (err) {
     console.error(err);
-    return res.status(500).json({ message: "Server error", error: err.message });
+    return res
+      .status(500)
+      .json({ message: "Server error", error: err.message });
   }
 };
-
 
 // POST /api/auth/verify-signup-otp
 exports.verifySignupOTP = async (req, res) => {
@@ -205,7 +207,6 @@ exports.verifySignupOTP = async (req, res) => {
   }
 };
 
-
 // POST /api/auth/resend-signup-otp
 exports.resendSignupOTP = async (req, res) => {
   const { email } = req.body;
@@ -242,7 +243,8 @@ exports.resendSignupOTP = async (req, res) => {
 
       return res.status(429).json({
         success: false,
-        message: "Your account is locked due to too many OTP requests. Try again after 1 hour.",
+        message:
+          "Your account is locked due to too many OTP requests. Try again after 1 hour.",
       });
     }
 
@@ -277,11 +279,11 @@ exports.resendSignupOTP = async (req, res) => {
     });
   } catch (err) {
     console.error(err);
-    return res.status(500).json({ message: "Server error", error: err.message });
+    return res
+      .status(500)
+      .json({ message: "Server error", error: err.message });
   }
 };
-
-
 
 // POST /api/auth/login
 exports.login = async (req, res) => {
@@ -355,12 +357,9 @@ exports.login = async (req, res) => {
   }
 };
 
-
-
 exports.deleteUserByAdmin = async (req, res) => {
   try {
     const { userId } = req.params;
-
 
     if (!userId) {
       return res.status(400).json({
@@ -398,7 +397,6 @@ exports.deleteUserByAdmin = async (req, res) => {
     });
   }
 };
-
 
 // POST /api/auth/sendForgotPassOtp
 exports.sendForgotPasswordOtp = async (req, res) => {
@@ -467,7 +465,7 @@ exports.sendForgotPasswordOtp = async (req, res) => {
 exports.verifyForgotPasswordOtp = async (req, res) => {
   try {
     const { email, otp } = req.body;
-    console.log(req.body)
+    console.log(req.body);
 
     if (!email || otp === undefined || otp === null) {
       return res.status(400).json({
@@ -630,7 +628,6 @@ exports.changePassword = async (req, res) => {
   }
 };
 
-
 // POST /api/auth/resend-forget-otp
 // Resend OTP for forgot password
 exports.resendForgotPasswordOtp = async (req, res) => {
@@ -701,13 +698,12 @@ exports.resendForgotPasswordOtp = async (req, res) => {
   }
 };
 
-
 // POST /api/auth/allUser
 exports.allUserList = async (req, res) => {
-
   try {
-    const users = await Player.find({ }) 
-      .select("username email gender country accountStatus");
+    const users = await Player.find({}).select(
+      "username email gender country accountStatus"
+    );
 
     return res.status(200).json({
       success: true,
@@ -722,48 +718,44 @@ exports.allUserList = async (req, res) => {
   }
 };
 
-
 // POST /api/auth/save-fcmToken
-exports.saveFcmToken = async(req, res) =>{
+exports.saveFcmToken = async (req, res) => {
   try {
-    const {fcmToken} =req.body;
+    const { fcmToken } = req.body;
     const { _id } = req.user;
-    
-    if(!fcmToken){
+
+    if (!fcmToken) {
       return res.status(404).json({
         success: false,
         message: "fcm token not found",
       });
     }
 
-    const response = await Player.findByIdAndUpdate(_id, {fcmToken});
+    const response = await Player.findByIdAndUpdate(_id, { fcmToken });
 
     return res.status(201).json({
       success: true,
-      message: "fcm token added"
-    })
-
+      message: "fcm token added",
+    });
   } catch (error) {
     return res.status(500).json({
       success: false,
       message: "Server error",
     });
   }
-}
-
+};
 
 // POST /api/auth/getuser
 
 exports.getUser = async (req, res) => {
-  const { _id } = req.user; 
+  const { _id } = req.user;
   try {
-    const user = await Player.findById(_id); 
-      
+    const user = await Player.findById(_id);
+
     return res.status(200).json({
       success: true,
       user,
     });
-    
   } catch (error) {
     console.error("Error fetching users:", error);
     return res.status(500).json({
@@ -771,11 +763,11 @@ exports.getUser = async (req, res) => {
       message: "Server error",
     });
   }
-}
+};
 
 exports.getUserById = async (req, res) => {
   try {
-    const { userId } = req.body; // ID coming from req.body
+    const { userId } = req.query; // ✅ use query for GET
 
     if (!userId) {
       return res.status(400).json({
@@ -807,4 +799,3 @@ exports.getUserById = async (req, res) => {
     });
   }
 };
-
