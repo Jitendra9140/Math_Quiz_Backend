@@ -1,236 +1,16 @@
-// const { MatchmakingService } = require("../services/MatchmakingService");
-// const { GameRoomManager } = require("../services/GameRoomManager");
-// const { PlayerManager } = require("../services/PlayerManager");
-// const { QuestionService } = require("../services/QuestionService");
-// const RedisClient=require("../config/redis")
-
-// module.exports =function registerSocketHandlers(io) {
-//   const playerManager = new PlayerManager();
-//   const questionService = new QuestionService();
-//   const gameRoomManager = new GameRoomManager(questionService, io);
-//   const matchmakingService = new MatchmakingService(
-//     playerManager,
-//     gameRoomManager
-//   );
-
-// io.on("connection", async (socket) => {
-//     console.log(`Player connected: ${socket.id}`);
-    
-//     try {
-//       const result = await RedisClient.get("foo");
-//       console.log("Redis result io:", result);
-//     } catch (err) {
-//       console.error("Redis failed on connect:", err);
-//     }
-
-//     socket.on("join-lobby", (playerData) => {
-//       try {
-//         // ✅ Ensure userId (MongoDB ID) is present
-//         if (!playerData.userId) {
-//           throw new Error("userId (MongoDB ID) is required");
-//         }
-        
-//         const player = playerManager.addPlayer(socket.id, {
-//           id: playerData.userId, // ✅ Use MongoDB ID as primary ID
-//           username: playerData.username,
-//           email: playerData.email,
-//           rating: playerData.rating,
-//           diff: playerData.diff,
-//           timer: playerData.timer,
-//           symbol: playerData.symbol,
-//         });
-
-//         // ✅ Send back MongoDB ID explicitly
-//         socket.emit("lobby-joined", {
-//           success: true,
-//           player: {
-//             id: player.id, // MongoDB ID
-//             socketId: player.socketId,
-//             username: player.username,
-//             rating: player.rating,
-//           },
-//         });
-
-//         console.log("✅ Player joined lobby:", player.id);
-//         console.log(
-//           "📊 Current queue status:",
-//           matchmakingService.getQueueStatus()
-//         ); // DEBUG
-
-//         // Start matchmaking
-//         matchmakingService.findMatch(player, (gameRoom) => {
-//           console.log("🎮 Match found for:", player.id);
-
-//           matchmakingService.removeFromQueue(player);
-//           const opponent = gameRoom.getOpposingPlayer(player.id);
-//           matchmakingService.removeFromQueue(opponent);
-
-//           // Notify both players about the match
-//           const players = gameRoom.getPlayers();
-//           players.forEach((p) => {
-//             const otherPlayer = players.find((pl) => pl.id !== p.id);
-
-//             console.log(
-//               `📤 Sending match-found to ${p.username} (${p.socketId})`
-//             ); // DEBUG
-
-//             // ✅ Send complete player data with MongoDB IDs
-//             io.to(p.socketId).emit("match-found", {
-//               gameRoom: gameRoom.getPublicData(),
-//               opponent: {
-//                 id: otherPlayer.id, // MongoDB ID
-//                 username: otherPlayer.username,
-//                 rating: otherPlayer.rating,
-//               },
-//               myPlayerId: p.id, // ✅ Add this for clarity
-//               initialQuestionMeter: gameRoom.questionMeter,
-//             });
-//           });
-
-//           // Start the game after a brief delay
-//           setTimeout(() => {
-//             gameRoom.startGame();
-//             console.log("🚀 GAME STARTED");
-
-//             players.forEach((p) => {
-//               console.log(
-//                 `📤 Sending game-started to ${p.username} (${p.socketId})`
-//               ); // DEBUG
-
-//               io.to(p.socketId).emit("game-started", {
-//                 gameState: gameRoom.getGameState(),
-//                 currentQuestion: gameRoom.getCurrentQuestion(),
-//                 myPlayerId: p.id, // ✅ Explicitly send MongoDB ID
-//               });
-//             });
-//           }, 3000);
-//         });
-//       } catch (error) {
-//         console.error("❌ join-lobby error:", error);
-//         socket.emit("error", { message: error.message });
-//       }
-//     });
-
-//     socket.on("cancel_search", () => {
-//       try {
-//         const player = playerManager.getPlayer(socket.id);
-//         if (player) {
-//           matchmakingService.removeFromQueue(player);
-//           console.log("❌ Player cancelled search:", player.id);
-//           console.log(
-//             "📊 Queue after cancellation:",
-//             matchmakingService.getQueueStatus()
-//           ); // DEBUG
-//         }
-//       } catch (error) {
-//         console.error("❌ cancel_search error:", error);
-//       }
-//     });
-
-//     socket.on("submit-answer", (data) => {
-//       try {
-//         console.log("📝 submit-answer:", data);
-
-//         // ✅ Get player by socket ID
-//         const player = playerManager.getPlayer(socket.id);
-//         if (!player) throw new Error("Player not found");
-
-//         console.log("✅ Player found:", player.id);
-
-//         const gameRoom = gameRoomManager.getPlayerGameRoom(player.id);
-//         if (!gameRoom) throw new Error("Game room not found");
-
-//         console.log("✅ Game room found:", gameRoom.id);
-
-//         // Record the answer
-//         const result = gameRoom.submitAnswer(
-//           player.id,
-//           data.answer,
-//           data.timeSpent
-//         );
-
-//         console.log("✅ Answer submitted, result:", result);
-
-//         // ✅ Broadcast score update to opponent
-//         const opponent = gameRoom.getOpposingPlayer(player.id);
-//         if (opponent) {
-//           const playerScore = gameRoom.playerScores.get(player.id);
-//           io.to(opponent.socketId).emit("opponent-score-update", {
-//             opponentId: player.id,
-//             score: playerScore.score,
-//             correctAnswers: playerScore.correctAnswers,
-//           });
-//         }
-
-//         // Generate next question for answerer
-//         gameRoom.emitNextQuestion(player.id);
-//       } catch (err) {
-//         console.error("❌ submit-answer error:", err);
-//         socket.emit("error", { message: err.message });
-//       }
-//     });
-
-//     socket.on("get-game-state", () => {
-//       try {
-//         const player = playerManager.getPlayer(socket.id);
-//         if (!player) throw new Error("Player not found");
-
-//         const gameRoom = gameRoomManager.getPlayerGameRoom(player.id);
-//         if (!gameRoom) throw new Error("Game room not found");
-
-//         socket.emit("game-state-update", {
-//           gameState: gameRoom.getGameState(),
-//           currentQuestion: gameRoom.getCurrentQuestion(),
-//           questionMeter: gameRoom.questionMeter,
-//           myPlayerId: player.id, // ✅ Include MongoDB ID
-//         });
-//       } catch (error) {
-//         socket.emit("error", { message: error.message });
-//       }
-//     });
-
-//     socket.on("disconnect", () => {
-//       console.log(`👋 Player disconnected: ${socket.id}`);
-
-//       const player = playerManager.getPlayer(socket.id);
-//       if (player) {
-//         // Remove from matchmaking queue
-//         matchmakingService.removeFromQueue(player);
-//         console.log(
-//           "📊 Queue after disconnect:",
-//           matchmakingService.getQueueStatus()
-//         ); // DEBUG
-
-//         // Handle game room disconnection
-//         const gameRoom = gameRoomManager.getPlayerGameRoom(player.id);
-//         if (gameRoom) {
-//           gameRoom.handlePlayerDisconnect(player.id);
-//           const remainingPlayer = gameRoom
-//             .getPlayers()
-//             .find((p) => p.id !== player.id);
-//           if (remainingPlayer) {
-//             io.to(remainingPlayer.socketId).emit("opponent-disconnected", {
-//               message: "Your opponent has disconnected. You win by default!",
-//               finalQuestionMeter: gameRoom.questionMeter,
-//             });
-//           }
-//           gameRoomManager.removeGameRoom(gameRoom.id);
-//         }
-
-//         // Remove player
-//         playerManager.removePlayer(socket.id);
-//       }
-//     });
-//   });
-// };
 // handlers/socketHandler.js
-const { RedisMatchmakingService } = require("../services/RedisMatchmakingService");
+const {
+  RedisMatchmakingService,
+} = require("../services/RedisMatchmakingService");
 const { GameRoomManager } = require("../services/GameRoomManager");
 const { PlayerManager } = require("../services/PlayerManager");
 const { QuestionService } = require("../services/QuestionService");
+const {
+  PVPChallengeController,
+} = require("./pvpChallengeController");
 const { getRedisClient } = require("../config/redis");
 
-module.exports = function registerSocketHandlers(io) {
+module.exports = function registerSocketHandlers(io, app) {
   const playerManager = new PlayerManager();
   const questionService = new QuestionService();
   const gameRoomManager = new GameRoomManager(questionService, io);
@@ -238,6 +18,20 @@ module.exports = function registerSocketHandlers(io) {
     playerManager,
     gameRoomManager
   );
+
+  // ✅ Initialize Challenge Controller
+  const challengeController = new PVPChallengeController(
+    io,
+    playerManager,
+    gameRoomManager,
+    questionService
+  );
+
+  // ✅ Store in app.locals for route access
+  if (app && app.locals) {
+    app.locals.playerManager = playerManager;
+    app.locals.challengeController = challengeController;
+  }
 
   io.on("connection", async (socket) => {
     console.log(`✅ Player connected: ${socket.id}`);
@@ -252,15 +46,14 @@ module.exports = function registerSocketHandlers(io) {
     }
 
     /* ========================================
-       JOIN LOBBY & START MATCHMAKING
-    ======================================== */
-    socket.on("join-lobby", async (playerData) => {
+   REGISTER PLAYER (ONLINE ONLY)
+   No matchmaking, no challenge
+======================================== */
+    socket.on("register-player", (playerData) => {
       try {
         if (!playerData.userId) {
-          throw new Error("userId (MongoDB ID) is required");
+          throw new Error("userId is required");
         }
-
-        socket.join(socket.id);
 
         const player = playerManager.addPlayer(socket.id, {
           id: playerData.userId,
@@ -272,6 +65,39 @@ module.exports = function registerSocketHandlers(io) {
           symbol: playerData.symbol,
         });
 
+        socket.emit("player-registered", {
+          success: true,
+          message: "Player is online",
+          player: {
+            id: player.id,
+            username: player.username,
+            rating: player.rating,
+            diff: player.diff,
+            timer: player.timer,
+          },
+          onlineCount: playerManager.getOnlineCount(),
+        });
+
+        console.log(`🟢 Player ONLINE: ${player.username} (${player.id})`);
+      } catch (error) {
+        console.error("❌ register-player error:", error);
+        socket.emit("error", { message: error.message });
+      }
+    });
+
+    /* ========================================
+       JOIN LOBBY & START MATCHMAKING
+    ======================================== */
+    socket.on("join-lobby", async () => {
+      try {
+        const player = playerManager.getPlayer(socket.id);
+
+        if (!player) {
+          throw new Error("Player not registered. Call register-player first.");
+        }
+
+        socket.join(socket.id);
+
         socket.emit("lobby-joined", {
           success: true,
           player: {
@@ -282,56 +108,171 @@ module.exports = function registerSocketHandlers(io) {
           },
         });
 
-        console.log(`✅ ${player.username} joined lobby (Rating: ${player.rating})`);
-        console.log(`✅ Socket ${socket.id} joined room ${socket.id}`);
+        console.log(`✅ ${player.username} joined lobby`);
 
         const queueStatus = await matchmakingService.getQueueStatus();
-        console.log(`📊 Queue status: ${queueStatus.totalInQueue} players waiting`);
+        console.log(`📊 Queue status: ${queueStatus.totalInQueue}`);
 
-        // Start Redis-based matchmaking
-        await matchmakingService.findMatch(player, (gameRoom) => {
-          console.log(`🎮 Match found: ${player.username} vs opponent`);
+        await matchmakingService.findMatch(player, onMatchFound);
+      } catch (err) {
+        console.error("❌ join-lobby error:", err);
+        socket.emit("error", { message: err.message });
+      }
+    });
 
-          const opponent = gameRoom.getOpposingPlayer(player.id);
 
-          // Notify both players about the match
-          const players = gameRoom.getPlayers();
-          players.forEach((p) => {
-            const otherPlayer = players.find((pl) => pl.id !== p.id);
+    /* ========================================
+       CHALLENGE SYSTEM SOCKET HANDLERS
+    ======================================== */
 
-            console.log(`📤 Sending match-found to ${p.username} (${p.socketId})`);
+    /**
+     * SEND CHALLENGE
+     * Client sends: { username, userId, diff, timer, symbol }
+     */
+    socket.on("send-challenge", async (data) => {
+      try {
+        console.log(`📤 Challenge request from ${socket.id}:`, data);
 
-            io.to(p.socketId).emit("match-found", {
-              gameRoom: gameRoom.getPublicData(),
-              opponent: {
-                id: otherPlayer.id,
-                username: otherPlayer.username,
-                rating: otherPlayer.rating,
-              },
-              myPlayerId: p.id,
-              initialQuestionMeter: gameRoom.questionMeter,
-            });
+        // Extract target player identifier
+        const targetIdentifier = {
+          username: data.username,
+          userId: data.userId,
+        };
+
+        // Extract custom settings (if provided)
+        const customSettings = {
+          diff: data.diff,
+          timer: data.timer,
+          symbol: data.symbol,
+        };
+
+        const result = await challengeController.sendChallenge(
+          socket.id,
+          targetIdentifier,
+          customSettings
+        );
+
+        socket.emit("challenge-sent-success", result);
+      } catch (error) {
+        console.error("❌ send-challenge error:", error);
+        socket.emit("challenge-error", {
+          action: "send",
+          message: error.message,
+        });
+      }
+    });
+
+    /**
+     * ACCEPT CHALLENGE
+     * Client sends: { challengeId }
+     */
+    socket.on("accept-challenge", async (data) => {
+      try {
+        console.log(`✅ Accept challenge from ${socket.id}:`, data);
+
+        const result = await challengeController.acceptChallenge(
+          socket.id,
+          data.challengeId
+        );
+
+        socket.emit("challenge-accepted-success", result);
+      } catch (error) {
+        console.error("❌ accept-challenge error:", error);
+        socket.emit("challenge-error", {
+          action: "accept",
+          message: error.message,
+          challengeId: data.challengeId,
+        });
+      }
+    });
+
+    /**
+     * DECLINE CHALLENGE
+     * Client sends: { challengeId }
+     */
+    socket.on("decline-challenge", async (data) => {
+      try {
+        console.log(`❌ Decline challenge from ${socket.id}:`, data);
+
+        const result = await challengeController.declineChallenge(
+          socket.id,
+          data.challengeId
+        );
+
+        socket.emit("challenge-declined-success", result);
+      } catch (error) {
+        console.error("❌ decline-challenge error:", error);
+        socket.emit("challenge-error", {
+          action: "decline",
+          message: error.message,
+          challengeId: data.challengeId,
+        });
+      }
+    });
+
+    /**
+     * CANCEL CHALLENGE
+     * Client sends: { challengeId }
+     */
+    socket.on("cancel-challenge", async (data) => {
+      try {
+        console.log(`🚫 Cancel challenge from ${socket.id}:`, data);
+
+        const result = await challengeController.cancelChallenge(
+          socket.id,
+          data.challengeId
+        );
+
+        socket.emit("challenge-cancelled-success", result);
+      } catch (error) {
+        console.error("❌ cancel-challenge error:", error);
+        socket.emit("challenge-error", {
+          action: "cancel",
+          message: error.message,
+          challengeId: data.challengeId,
+        });
+      }
+    });
+
+    /**
+     * GET MY CHALLENGES
+     */
+    socket.on("get-my-challenges", () => {
+      try {
+        const player = playerManager.getPlayer(socket.id);
+        if (!player) {
+          socket.emit("challenge-error", {
+            action: "get-challenges",
+            message: "Player not found",
           });
+          return;
+        }
 
-          // Start the game after a brief delay
-          setTimeout(() => {
-            gameRoom.startGame();
-            console.log(`🚀 GAME STARTED: ${gameRoom.id}`);
+        const challenges = challengeController.getPlayerChallenges(player.id);
 
-            players.forEach((p) => {
-              console.log(`📤 Sending game-started to ${p.username}`);
-
-              io.to(p.socketId).emit("game-started", {
-                gameState: gameRoom.getGameState(),
-                currentQuestion: gameRoom.getCurrentQuestion(),
-                myPlayerId: p.id,
-              });
-            });
-          }, 3000);
+        socket.emit("my-challenges", {
+          challenges,
+          totalSent: challenges.filter((c) => c.type === "sent").length,
+          totalReceived: challenges.filter((c) => c.type === "received").length,
         });
       } catch (error) {
-        console.error("❌ join-lobby error:", error);
-        socket.emit("error", { message: error.message });
+        console.error("❌ get-my-challenges error:", error);
+        socket.emit("challenge-error", {
+          action: "get-challenges",
+          message: error.message,
+        });
+      }
+    });
+
+    /**
+     * GET CHALLENGE STATISTICS (ADMIN)
+     */
+    socket.on("get-challenge-stats", () => {
+      try {
+        const stats = challengeController.getStatistics();
+        socket.emit("challenge-stats", stats);
+      } catch (error) {
+        console.error("❌ get-challenge-stats error:", error);
       }
     });
 
@@ -470,11 +411,15 @@ module.exports = function registerSocketHandlers(io) {
 
       console.log(`🔍 Handling disconnect for ${player.username}`);
 
-      // 1. REMOVE FROM MATCHMAKING QUEUE
+      // 1. HANDLE PENDING CHALLENGES
+      await challengeController.handlePlayerDisconnect(player.id);
+      console.log("✅ Challenge cleanup completed");
+
+      // 2. REMOVE FROM MATCHMAKING QUEUE
       await matchmakingService.removeFromQueue(player);
       console.log("✅ Removed from matchmaking queue");
 
-      // 2. HANDLE GAME ROOM DISCONNECTION
+      // 3. HANDLE GAME ROOM DISCONNECTION
       const gameRoom = gameRoomManager.getPlayerGameRoom(player.id);
 
       if (gameRoom) {
@@ -505,7 +450,7 @@ module.exports = function registerSocketHandlers(io) {
         console.log(`🗑️ Game room removed: ${gameRoom.id}`);
       }
 
-      // 3. REMOVE PLAYER (with grace period for reconnect)
+      // 4. REMOVE PLAYER (with grace period for reconnect)
       playerManager.removePlayer(socket.id);
       console.log(`🗑️ Player removed: ${player.username}`);
     });
@@ -513,12 +458,14 @@ module.exports = function registerSocketHandlers(io) {
 
   // Cleanup on server shutdown
   process.on("SIGTERM", async () => {
-    console.log("🛑 Server shutting down, cleaning up matchmaking...");
+    console.log("🛑 Server shutting down, cleaning up...");
+    await challengeController.destroy();
     await matchmakingService.destroy();
   });
 
   process.on("SIGINT", async () => {
-    console.log("🛑 Server interrupted, cleaning up matchmaking...");
+    console.log("🛑 Server interrupted, cleaning up...");
+    await challengeController.destroy();
     await matchmakingService.destroy();
   });
 };

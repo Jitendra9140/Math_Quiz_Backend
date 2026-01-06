@@ -448,7 +448,7 @@ class RedisMatchmakingService {
     try {
       if (!this.isInitialized) return;
 
-      console.log("🧹 Running queue cleanup...");
+      // console.log("🧹 Running queue cleanup...");
 
       const allBuckets = this.getAllBuckets();
       const difficulties = ["easy", "medium", "hard"];
