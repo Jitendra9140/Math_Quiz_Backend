@@ -93,7 +93,7 @@ module.exports = function registerSocketHandlers(io, app) {
         const player = playerManager.getPlayer(socket.id);
 
         if (!player) {
-          throw new Error("Player not registered. Call register-player first.");
+          throw new Error("Player not registered");
         }
 
         socket.join(socket.id);
@@ -108,17 +108,53 @@ module.exports = function registerSocketHandlers(io, app) {
           },
         });
 
-        console.log(`✅ ${player.username} joined lobby`);
+        console.log(
+          `✅ ${player.username} joined lobby (Rating: ${player.rating})`
+        );
 
         const queueStatus = await matchmakingService.getQueueStatus();
-        console.log(`📊 Queue status: ${queueStatus.totalInQueue}`);
+        console.log(
+          `📊 Queue status: ${queueStatus.totalInQueue} players waiting`
+        );
 
-        await matchmakingService.findMatch(player, onMatchFound);
-      } catch (err) {
-        console.error("❌ join-lobby error:", err);
-        socket.emit("error", { message: err.message });
+        await matchmakingService.findMatch(player, (gameRoom) => {
+          console.log(`🎮 Match found`);
+
+          const players = gameRoom.getPlayers();
+
+          players.forEach((p) => {
+            const opponent = players.find((x) => x.id !== p.id);
+
+            io.to(p.socketId).emit("match-found", {
+              gameRoom: gameRoom.getPublicData(),
+              opponent: {
+                id: opponent.id,
+                username: opponent.username,
+                rating: opponent.rating,
+              },
+              myPlayerId: p.id,
+              initialQuestionMeter: gameRoom.questionMeter,
+            });
+          });
+
+          setTimeout(() => {
+            gameRoom.startGame();
+
+            players.forEach((p) => {
+              io.to(p.socketId).emit("game-started", {
+                gameState: gameRoom.getGameState(),
+                currentQuestion: gameRoom.getCurrentQuestion(),
+                myPlayerId: p.id,
+              });
+            });
+          }, 3000);
+        });
+      } catch (error) {
+        console.error("❌ join-lobby error:", error);
+        socket.emit("error", { message: error.message });
       }
     });
+
 
 
     /* ========================================
