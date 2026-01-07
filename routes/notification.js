@@ -10,6 +10,7 @@ const {
   stopNotification,
   getDeliveryLogs,
   trackOpen,
+  getInAppNotifications,
   retryFailed,
   updateConfig,
 } = require("../controller/Notification");
@@ -27,6 +28,9 @@ router.post("/notifications/:notificationId/send", sendNotification);
 router.post("/notifications/:notificationId/stop", stopNotification);
 
 router.post("/notifications/:notificationId/retry", retryFailed);
+
+
+router.get("/notifications/in-app", getInAppNotifications);
 
 // Analytics Routes
 router.get("/analytics/overall", getOverallAnalytics);

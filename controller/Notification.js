@@ -90,6 +90,9 @@ const createNotification = async (req, res) => {
 /**
  * Send notification immediately
  */
+
+
+
 const sendNotification = async (req, res) => {
   try {
     const { notificationId } = req.params;
@@ -116,8 +119,51 @@ const sendNotification = async (req, res) => {
 };
 
 /**
+ * Get all in-app notifications with filters
+ */
+const getInAppNotifications = async (req, res) => {
+  try {
+    const notifications = await Notification.find({
+      type: "in-app",
+      status: "completed", // optional but recommended
+    })
+      .sort({ createdAt: -1 })
+      .select({
+        "message.title": 1,
+        "message.body": 1,
+        "message.imageUrl": 1,
+        createdAt: 1,
+        _id: 0, // remove if you want id
+      });
+
+    // Transform response (clean output)
+    const response = notifications.map((n) => ({
+      title: n.message.title,
+      body: n.message.body,
+      imageUrl: n.message.imageUrl || null,
+      date: n.createdAt,
+    }));
+
+    return res.status(200).json({
+      success: true,
+      data: response,
+    });
+  } catch (error) {
+    console.error("Get in-app notifications error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch in-app notifications",
+      error: error.message,
+    });
+  }
+};
+
+
+
+/**
  * Get notification analytics
  */
+
 const getAnalytics = async (req, res) => {
   try {
     const { notificationId } = req.params;
@@ -521,4 +567,5 @@ module.exports = {
   trackOpen,
   retryFailed,
   updateConfig,
+  getInAppNotifications,
 };
