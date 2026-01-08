@@ -701,12 +701,13 @@ exports.resendForgotPasswordOtp = async (req, res) => {
 // POST /api/auth/allUser
 exports.allUserList = async (req, res) => {
   try {
-    const users = await Player.find({}).select(
-      "username email gender country accountStatus"
-    );
+    console.log("allUsers");
+
+    const users = await Player.find({}).lean(); // lean = faster, full object
 
     return res.status(200).json({
       success: true,
+      count: users.length,
       users,
     });
   } catch (error) {
@@ -717,6 +718,7 @@ exports.allUserList = async (req, res) => {
     });
   }
 };
+
 
 // POST /api/auth/save-fcmToken
 exports.saveFcmToken = async (req, res) => {
