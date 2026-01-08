@@ -125,7 +125,7 @@ const getInAppNotifications = async (req, res) => {
   try {
     const notifications = await Notification.find({
       type: "in-app",
-      status: "completed", // optional but recommended
+      status: "completed", 
     })
       .sort({ createdAt: -1 })
       .select({

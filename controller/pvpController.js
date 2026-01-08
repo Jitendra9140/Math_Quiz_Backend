@@ -88,72 +88,77 @@ module.exports = function registerSocketHandlers(io, app) {
     /* ========================================
        JOIN LOBBY & START MATCHMAKING
     ======================================== */
-    socket.on("join-lobby", async () => {
-      try {
-        const player = playerManager.getPlayer(socket.id);
+   socket.on("join-lobby", async (lobbyData) => {
+     try {
+       const player = playerManager.getPlayer(socket.id);
 
-        if (!player) {
-          throw new Error("Player not registered");
-        }
+       if (!player) {
+         throw new Error("Player not registered");
+       }
 
-        socket.join(socket.id);
+       // 🔥 UPDATE PLAYER GAME DYNAMICS HERE
+       playerManager.updatePlayerGamePreferences(socket.id, {
+         diff: lobbyData.diff,
+         timer: lobbyData.timer,
+         symbol: lobbyData.symbol,
+         rating: lobbyData.rating,
+       });
 
-        socket.emit("lobby-joined", {
-          success: true,
-          player: {
-            id: player.id,
-            socketId: player.socketId,
-            username: player.username,
-            rating: player.rating,
-          },
-        });
+       socket.join(socket.id);
 
-        console.log(
-          `✅ ${player.username} joined lobby (Rating: ${player.rating})`
-        );
+       socket.emit("lobby-joined", {
+         success: true,
+         player: {
+           id: player.id,
+           socketId: player.socketId,
+           username: player.username,
+           rating: player.rating,
+           diff: player.diff,
+           timer: player.timer,
+           symbol: player.symbol,
+         },
+       });
 
-        const queueStatus = await matchmakingService.getQueueStatus();
-        console.log(
-          `📊 Queue status: ${queueStatus.totalInQueue} players waiting`
-        );
+       console.log(
+         `🎯 ${player.username} joined lobby | Rating:${player.rating} | Diff:${player.diff} | Timer:${player.timer}`
+       );
 
-        await matchmakingService.findMatch(player, (gameRoom) => {
-          console.log(`🎮 Match found`);
+       await matchmakingService.findMatch(player, (gameRoom) => {
+         const players = gameRoom.getPlayers();
 
-          const players = gameRoom.getPlayers();
+         players.forEach((p) => {
+           const opponent = players.find((x) => x.id !== p.id);
 
-          players.forEach((p) => {
-            const opponent = players.find((x) => x.id !== p.id);
+           io.to(p.socketId).emit("match-found", {
+             gameRoom: gameRoom.getPublicData(),
+             opponent: {
+               id: opponent.id,
+               username: opponent.username,
+               rating: opponent.rating,
+             },
+             myPlayerId: p.id,
+             initialQuestionMeter: gameRoom.questionMeter,
+           });
+         });
 
-            io.to(p.socketId).emit("match-found", {
-              gameRoom: gameRoom.getPublicData(),
-              opponent: {
-                id: opponent.id,
-                username: opponent.username,
-                rating: opponent.rating,
-              },
-              myPlayerId: p.id,
-              initialQuestionMeter: gameRoom.questionMeter,
-            });
-          });
+         setTimeout(() => {
+           gameRoom.startGame();
 
-          setTimeout(() => {
-            gameRoom.startGame();
+           players.forEach((p) => {
+             io.to(p.socketId).emit("game-started", {
+               gameState: gameRoom.getGameState(),
+               currentQuestion: gameRoom.getCurrentQuestion(),
+               myPlayerId: p.id,
+             });
+           });
+         }, 3000);
+       });
+     } catch (error) {
+       console.error("❌ join-lobby error:", error);
+       socket.emit("error", { message: error.message });
+     }
+   });
 
-            players.forEach((p) => {
-              io.to(p.socketId).emit("game-started", {
-                gameState: gameRoom.getGameState(),
-                currentQuestion: gameRoom.getCurrentQuestion(),
-                myPlayerId: p.id,
-              });
-            });
-          }, 3000);
-        });
-      } catch (error) {
-        console.error("❌ join-lobby error:", error);
-        socket.emit("error", { message: error.message });
-      }
-    });
 
 
 

@@ -86,6 +86,25 @@ class PlayerManager {
   getPlayerById(playerId) {
     return this.playersById.get(playerId);
   }
+  updatePlayerGamePreferences(socketId, updates) {
+    const player = this.players.get(socketId);
+    if (!player) return null;
+
+    // 🔁 Remove from old rating group if rating changes
+    if (updates.rating && updates.rating !== player.rating) {
+      this.removeFromRatingGroup(player);
+      player.rating = updates.rating;
+      this.addToRatingGroup(player);
+    }
+
+    if (updates.diff !== undefined) player.diff = updates.diff;
+    if (updates.timer !== undefined) player.timer = updates.timer;
+    if (updates.symbol !== undefined) player.symbol = updates.symbol;
+
+    player.lastActivity = Date.now();
+
+    return player;
+  }
 
   updatePlayerActivity(socketId) {
     const player = this.players.get(socketId);
